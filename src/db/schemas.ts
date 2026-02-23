@@ -103,3 +103,44 @@ export const AIImportPayloadSchema = z.object({
     logEntries: z.array(AILogEntrySchema).optional(),
 })
 export type AIImportPayload = z.infer<typeof AIImportPayloadSchema>
+
+// ─── AI Meal Plan Import ───
+export const AIMealPlanRuleSchema = z.object({
+    slotId: SlotId,
+    recipeNames: z.array(z.string().min(1)).min(1),
+    intervalDays: z.number().int().min(1),
+})
+
+export const AIMealPlanImportSchema = z.object({
+    rules: z.array(AIMealPlanRuleSchema).min(1),
+    newFoods: z.array(AIFoodSchema).optional(),
+    newRecipes: z.array(AIRecipeSchema).optional(),
+})
+export type AIMealPlanImport = z.infer<typeof AIMealPlanImportSchema>
+
+// ─── Meal Plan Export ───
+export interface MealPlanExport {
+    exportedAt: string
+    rules: {
+        slot: string
+        slotId: SlotId
+        recipeNames: string[]
+        intervalDays: number
+    }[]
+    recipes: {
+        name: string
+        ingredients: {
+            foodName: string
+            grams: number
+        }[]
+    }[]
+    foods: {
+        name: string
+        nutritionPer100g: {
+            kcal: number
+            protein: number
+            carbs: number
+            fat: number
+        }
+    }[]
+}

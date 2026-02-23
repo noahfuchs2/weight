@@ -2,19 +2,66 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format, addDays, startOfWeek, isSameDay, parseISO } from 'date-fns'
 import { de } from 'date-fns/locale'
-import { Plus, Check, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { Plus, Check, ChevronLeft, ChevronRight, Trash2, Sparkles, Download, Upload, Copy, AlertCircle } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { db } from '@/db/database'
-import { SLOT_LABELS, type SlotId } from '@/db/schemas'
+import { SLOT_LABELS, type SlotId, AIMealPlanImportSchema, type AIMealPlanImport, type MealPlanExport } from '@/db/schemas'
 import type { RotationRule, Recipe } from '@/db/schemas'
 import { ORDERED_SLOTS } from '@/stores/appStore'
 import { generateId } from '@/lib/utils'
 import { calcRecipeNutrition } from '@/hooks/useDailyLog'
+
+// ─── AI Prompt for Meal Plan Generation ───
+const MEALPLAN_AI_PROMPT = `Du bist ein Ernährungsplan-Assistent für einen 17-jährigen Sportler (1,81m) der Muskeln aufbauen möchte.
+Ziel: 3.500 kcal und 180g Protein pro Tag, aufgeteilt auf 5 Mahlzeiten:
+- morning (Morgens): ~850 kcal, 40g Protein
+- noon (Mittags): ~750 kcal, 45g Protein  
+- afternoon (Nachmittags): ~500 kcal, 25g Protein
+- late_afternoon (Spät Nachmittags): ~650 kcal, 35g Protein
+- evening (Abends): ~750 kcal, 35g Protein
+
+Erstelle einen Wochenplan mit Rotationsregeln. Gib striktes JSON zurück:
+
+{
+  "rules": [
+    {
+      "slotId": "morning|noon|afternoon|late_afternoon|evening",
+      "recipeNames": ["Rezept A", "Rezept B"],
+      "intervalDays": 2
+    }
+  ],
+  "newFoods": [
+    {
+      "name": "Lebensmittel-Name",
+      "nutritionPer100g": { "kcal": 0, "protein": 0, "carbs": 0, "fat": 0 },
+      "source": "AI Meal Plan"
+    }
+  ],
+  "newRecipes": [
+    {
+      "name": "Rezept A",
+      "ingredients": [
+        { "foodName": "Lebensmittel-Name", "grams": 200 }
+      ]
+    }
+  ]
+}
+
+Regeln:
+- Jeder Slot soll eine Rotationsregel mit mindestens 2 Rezepten haben
+- recipeNames in den rules müssen exakt mit den Namen in newRecipes übereinstimmen
+- Alle Zutaten (foodName) müssen in newFoods definiert sein
+- Nährwerte sind IMMER pro 100g
+- Verwende deutsche Lebensmittelnamen
+- intervalDays = wie oft gewechselt wird (z.B. 2 = alle 2 Tage)
+- Gib NUR valides JSON zurück, keine Erklärungen`
 
 export function PlannerPage() {
     const [weekOffset, setWeekOffset] = useState(0)
@@ -23,6 +70,25 @@ export function PlannerPage() {
     const [ruleRecipeIds, setRuleRecipeIds] = useState<string[]>([])
     const [ruleInterval, setRuleInterval] = useState('2')
     const [editingRule, setEditingRule] = useState<RotationRule | null>(null)
+
+    // AI Import state
+    const [aiDialogOpen, setAiDialogOpen] = useState(false)
+    const [aiTab, setAiTab] = useState('prompt')
+    const [jsonInput, setJsonInput] = useState('')
+    const [aiError, setAiError] = useState<string | null>(null)
+    const [previewData, setPreviewData] = useState<AIMealPlanImport | null>(null)
+    const [copied, setCopied] = useState(false)
+
+    // Export state
+    const [exportDialogOpen, setExportDialogOpen] = useState(false)
+    const [exportJson, setExportJson] = useState('')
+    const [exportCopied, setExportCopied] = useState(false)
+
+    // Import from file state
+    const [importDialogOpen, setImportDialogOpen] = useState(false)
+    const [importJson, setImportJson] = useState('')
+    const [importError, setImportError] = useState<string | null>(null)
+    const [importPreview, setImportPreview] = useState<AIMealPlanImport | null>(null)
 
     const recipes = useLiveQuery(() => db.recipes.toArray()) ?? []
     const foods = useLiveQuery(() => db.foods.toArray()) ?? []
@@ -77,7 +143,6 @@ export function PlannerPage() {
         if (editingRule) {
             await db.rotationRules.update(rule.id, rule)
         } else {
-            // Remove existing rule for this slot
             const existing = rules.find((r) => r.slotId === ruleSlot)
             if (existing) await db.rotationRules.delete(existing.id)
             await db.rotationRules.add(rule)
@@ -97,6 +162,204 @@ export function PlannerPage() {
         setRuleRecipeIds([...rule.recipeIds])
         setRuleInterval(String(rule.intervalDays))
         setRuleDialogOpen(true)
+    }
+
+    // ─── AI Prompt Copy ───
+    const handleCopyPrompt = async () => {
+        await navigator.clipboard.writeText(MEALPLAN_AI_PROMPT)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
+
+    // ─── Parse & Save AI Meal Plan ───
+    const handleParseAI = () => {
+        setAiError(null)
+        try {
+            const raw = JSON.parse(jsonInput)
+            const result = AIMealPlanImportSchema.safeParse(raw)
+            if (!result.success) {
+                setAiError(`Validierungsfehler: ${result.error.issues.map((e) => `${(e.path as (string | number)[]).join('.')}: ${e.message}`).join(', ')}`)
+                return
+            }
+            setPreviewData(result.data)
+            setAiTab('preview')
+        } catch {
+            setAiError('Ungültiges JSON. Bitte prüfe die Eingabe.')
+        }
+    }
+
+    const saveMealPlanImport = async (data: AIMealPlanImport) => {
+        // 1. Create new foods
+        const foodNameToId = new Map<string, string>()
+        // First, map existing foods
+        for (const f of foods) {
+            foodNameToId.set(f.name.toLowerCase(), f.id)
+        }
+        // Add new foods
+        if (data.newFoods) {
+            for (const food of data.newFoods) {
+                if (foodNameToId.has(food.name.toLowerCase())) continue
+                const id = generateId()
+                foodNameToId.set(food.name.toLowerCase(), id)
+                await db.foods.add({
+                    id,
+                    name: food.name,
+                    nutritionPer100g: food.nutritionPer100g,
+                    source: food.source ?? 'AI Meal Plan',
+                })
+            }
+        }
+
+        // 2. Create new recipes
+        const recipeNameToId = new Map<string, string>()
+        for (const r of recipes) {
+            recipeNameToId.set(r.name.toLowerCase(), r.id)
+        }
+        if (data.newRecipes) {
+            for (const recipe of data.newRecipes) {
+                if (recipeNameToId.has(recipe.name.toLowerCase())) continue
+                const id = generateId()
+                recipeNameToId.set(recipe.name.toLowerCase(), id)
+                const ingredients = recipe.ingredients
+                    .map((ing) => ({
+                        foodId: foodNameToId.get(ing.foodName.toLowerCase()) ?? '',
+                        grams: ing.grams,
+                    }))
+                    .filter((ing) => ing.foodId !== '')
+                if (ingredients.length > 0) {
+                    await db.recipes.add({ id, name: recipe.name, ingredients })
+                }
+            }
+        }
+
+        // 3. Create rotation rules
+        for (const rule of data.rules) {
+            const recipeIds = rule.recipeNames
+                .map((name) => recipeNameToId.get(name.toLowerCase()) ?? '')
+                .filter((id) => id !== '')
+            if (recipeIds.length === 0) continue
+
+            // Remove existing rule for this slot
+            const existing = rules.find((r) => r.slotId === rule.slotId)
+            if (existing) await db.rotationRules.delete(existing.id)
+
+            await db.rotationRules.add({
+                id: generateId(),
+                slotId: rule.slotId,
+                recipeIds,
+                intervalDays: rule.intervalDays,
+                startDate: format(today, 'yyyy-MM-dd'),
+            })
+        }
+
+        setAiDialogOpen(false)
+        setPreviewData(null)
+        setJsonInput('')
+    }
+
+    // ─── Export ───
+    const handleExport = () => {
+        const exportData: MealPlanExport = {
+            exportedAt: new Date().toISOString(),
+            rules: rules.map((rule) => ({
+                slot: SLOT_LABELS[rule.slotId],
+                slotId: rule.slotId,
+                recipeNames: rule.recipeIds
+                    .map((id) => recipes.find((r) => r.id === id)?.name ?? '')
+                    .filter((n) => n !== ''),
+                intervalDays: rule.intervalDays,
+            })),
+            recipes: recipes
+                .filter((r) => rules.some((rule) => rule.recipeIds.includes(r.id)))
+                .map((r) => ({
+                    name: r.name,
+                    ingredients: r.ingredients.map((ing) => ({
+                        foodName: foods.find((f) => f.id === ing.foodId)?.name ?? '',
+                        grams: ing.grams,
+                    })),
+                })),
+            foods: foods
+                .filter((f) =>
+                    recipes.some((r) =>
+                        rules.some((rule) => rule.recipeIds.includes(r.id)) &&
+                        r.ingredients.some((ing) => ing.foodId === f.id)
+                    )
+                )
+                .map((f) => ({
+                    name: f.name,
+                    nutritionPer100g: f.nutritionPer100g,
+                })),
+        }
+        const json = JSON.stringify(exportData, null, 2)
+        setExportJson(json)
+        setExportDialogOpen(true)
+    }
+
+    const handleDownloadExport = () => {
+        const blob = new Blob([exportJson], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `nutritracker-wochenplan-${format(today, 'yyyy-MM-dd')}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+    }
+
+    const handleCopyExport = async () => {
+        await navigator.clipboard.writeText(exportJson)
+        setExportCopied(true)
+        setTimeout(() => setExportCopied(false), 2000)
+    }
+
+    // ─── Import from JSON ───
+    const handleParseImport = () => {
+        setImportError(null)
+        try {
+            const raw = JSON.parse(importJson)
+            // Accept both direct AIMealPlanImport and MealPlanExport format
+            if (raw.exportedAt && raw.rules) {
+                // It's an export format — convert to import format
+                const converted: AIMealPlanImport = {
+                    rules: raw.rules.map((r: { slotId: SlotId; recipeNames: string[]; intervalDays: number }) => ({
+                        slotId: r.slotId,
+                        recipeNames: r.recipeNames,
+                        intervalDays: r.intervalDays,
+                    })),
+                    newFoods: raw.foods?.map((f: { name: string; nutritionPer100g: { kcal: number; protein: number; carbs: number; fat: number } }) => ({
+                        name: f.name,
+                        nutritionPer100g: f.nutritionPer100g,
+                        source: 'Import',
+                    })),
+                    newRecipes: raw.recipes?.map((r: { name: string; ingredients: { foodName: string; grams: number }[] }) => ({
+                        name: r.name,
+                        ingredients: r.ingredients,
+                    })),
+                }
+                const result = AIMealPlanImportSchema.safeParse(converted)
+                if (!result.success) {
+                    setImportError(`Validierungsfehler: ${result.error.issues.map((e) => `${(e.path as (string | number)[]).join('.')}: ${e.message}`).join(', ')}`)
+                    return
+                }
+                setImportPreview(result.data)
+            } else {
+                const result = AIMealPlanImportSchema.safeParse(raw)
+                if (!result.success) {
+                    setImportError(`Validierungsfehler: ${result.error.issues.map((e) => `${(e.path as (string | number)[]).join('.')}: ${e.message}`).join(', ')}`)
+                    return
+                }
+                setImportPreview(result.data)
+            }
+        } catch {
+            setImportError('Ungültiges JSON. Bitte prüfe die Eingabe.')
+        }
+    }
+
+    const handleSaveImport = async () => {
+        if (!importPreview) return
+        await saveMealPlanImport(importPreview)
+        setImportDialogOpen(false)
+        setImportPreview(null)
+        setImportJson('')
     }
 
     return (
@@ -124,6 +387,59 @@ export function PlannerPage() {
                         </Button>
                     )}
                 </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                    variant="outline"
+                    onClick={() => {
+                        setEditingRule(null)
+                        setRuleSlot('noon')
+                        setRuleRecipeIds([])
+                        setRuleInterval('2')
+                        setRuleDialogOpen(true)
+                    }}
+                    className="gap-2"
+                >
+                    <Plus className="h-4 w-4" />
+                    Neue Regel
+                </Button>
+                <Button
+                    onClick={() => {
+                        setAiTab('prompt')
+                        setJsonInput('')
+                        setAiError(null)
+                        setPreviewData(null)
+                        setAiDialogOpen(true)
+                    }}
+                    className="gap-2"
+                >
+                    <Sparkles className="h-4 w-4" />
+                    AI Wochenplan erstellen
+                </Button>
+                <Button
+                    variant="outline"
+                    onClick={handleExport}
+                    disabled={rules.length === 0}
+                    className="gap-2"
+                >
+                    <Download className="h-4 w-4" />
+                    Exportieren
+                </Button>
+                <Button
+                    variant="outline"
+                    onClick={() => {
+                        setImportJson('')
+                        setImportError(null)
+                        setImportPreview(null)
+                        setImportDialogOpen(true)
+                    }}
+                    className="gap-2"
+                >
+                    <Upload className="h-4 w-4" />
+                    Importieren
+                </Button>
             </div>
 
             {/* Active Rules */}
@@ -160,26 +476,9 @@ export function PlannerPage() {
                 </Card>
             )}
 
-            {/* Add Rule Button */}
-            <Button
-                variant="outline"
-                onClick={() => {
-                    setEditingRule(null)
-                    setRuleSlot('noon')
-                    setRuleRecipeIds([])
-                    setRuleInterval('2')
-                    setRuleDialogOpen(true)
-                }}
-                className="gap-2"
-            >
-                <Plus className="h-4 w-4" />
-                Neue Rotationsregel
-            </Button>
-
             {/* Week Grid */}
             <div className="overflow-x-auto">
                 <div className="grid grid-cols-[120px_repeat(7,1fr)] gap-1 min-w-[900px]">
-                    {/* Header */}
                     <div />
                     {weekDays.map((day) => (
                         <div
@@ -192,7 +491,6 @@ export function PlannerPage() {
                         </div>
                     ))}
 
-                    {/* Rows per slot */}
                     {ORDERED_SLOTS.map((slotId) => (
                         <>
                             <div key={`label-${slotId}`} className="flex items-center px-2 text-xs font-medium text-muted-foreground">
@@ -207,10 +505,10 @@ export function PlannerPage() {
                                     <div
                                         key={`${slotId}-${day.toISOString()}`}
                                         className={`rounded-lg border p-2 min-h-[80px] text-xs transition-colors ${logged
-                                                ? 'bg-primary/10 border-primary/30'
-                                                : recipe
-                                                    ? 'border-border hover:border-primary/30'
-                                                    : 'border-border/50 bg-muted/10'
+                                            ? 'bg-primary/10 border-primary/30'
+                                            : recipe
+                                                ? 'border-border hover:border-primary/30'
+                                                : 'border-border/50 bg-muted/10'
                                             }`}
                                     >
                                         {recipe ? (
@@ -249,7 +547,7 @@ export function PlannerPage() {
                 </div>
             </div>
 
-            {/* Rule Dialog */}
+            {/* ═══ Rule Dialog ═══ */}
             <Dialog open={ruleDialogOpen} onOpenChange={setRuleDialogOpen}>
                 <DialogContent onClose={() => setRuleDialogOpen(false)}>
                     <DialogHeader>
@@ -257,7 +555,6 @@ export function PlannerPage() {
                             {editingRule ? 'Rotationsregel bearbeiten' : 'Neue Rotationsregel'}
                         </DialogTitle>
                     </DialogHeader>
-
                     <div className="space-y-4">
                         <div>
                             <Label className="mb-2 block">Mahlzeit-Slot</Label>
@@ -267,8 +564,8 @@ export function PlannerPage() {
                                         key={s}
                                         onClick={() => setRuleSlot(s)}
                                         className={`px-2 py-1.5 text-xs rounded-md transition-colors cursor-pointer ${ruleSlot === s
-                                                ? 'bg-primary text-primary-foreground'
-                                                : 'bg-muted text-muted-foreground hover:bg-accent'
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'bg-muted text-muted-foreground hover:bg-accent'
                                             }`}
                                     >
                                         {SLOT_LABELS[s]}
@@ -276,7 +573,6 @@ export function PlannerPage() {
                                 ))}
                             </div>
                         </div>
-
                         <div>
                             <Label className="mb-2 block">Rezepte (min. 2 auswählen)</Label>
                             <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -293,8 +589,8 @@ export function PlannerPage() {
                                                 }
                                             }}
                                             className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors cursor-pointer flex items-center justify-between ${selected
-                                                    ? 'bg-primary/15 text-primary'
-                                                    : 'hover:bg-muted'
+                                                ? 'bg-primary/15 text-primary'
+                                                : 'hover:bg-muted'
                                                 }`}
                                         >
                                             {r.name}
@@ -309,7 +605,6 @@ export function PlannerPage() {
                                 )}
                             </div>
                         </div>
-
                         <div>
                             <Label className="mb-2 block">Alle N Tage wechseln</Label>
                             <Input
@@ -321,13 +616,258 @@ export function PlannerPage() {
                             />
                         </div>
                     </div>
-
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setRuleDialogOpen(false)}>Abbrechen</Button>
                         <Button onClick={handleSaveRule} disabled={ruleRecipeIds.length < 2}>
                             Speichern
                         </Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ═══ AI Meal Plan Dialog ═══ */}
+            <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
+                <DialogContent onClose={() => setAiDialogOpen(false)} className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Sparkles className="h-5 w-5 text-primary" />
+                            AI Wochenplan erstellen
+                        </DialogTitle>
+                        <DialogDescription>
+                            Lass dir einen kompletten Wochenplan von ChatGPT oder Gemini generieren.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <Tabs value={aiTab} onValueChange={setAiTab}>
+                        <TabsList>
+                            <TabsTrigger value="prompt">1. Prompt</TabsTrigger>
+                            <TabsTrigger value="paste">2. JSON einfügen</TabsTrigger>
+                            <TabsTrigger value="preview" disabled={!previewData}>3. Vorschau</TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="prompt">
+                            <div className="space-y-4">
+                                <p className="text-sm text-muted-foreground">
+                                    Kopiere diesen Prompt, füge ihn in ChatGPT/Gemini ein und beschreibe deine Vorlieben
+                                    (z.B. "Ich mag Reis, Hähnchen, Quark und Shakes").
+                                </p>
+                                <div className="relative">
+                                    <pre className="bg-muted/50 rounded-lg p-4 text-xs font-mono whitespace-pre-wrap max-h-[350px] overflow-y-auto border border-border">
+                                        {MEALPLAN_AI_PROMPT}
+                                    </pre>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="absolute top-2 right-2 gap-1.5"
+                                        onClick={handleCopyPrompt}
+                                    >
+                                        {copied ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                                        {copied ? 'Kopiert!' : 'Kopieren'}
+                                    </Button>
+                                </div>
+                                <Button onClick={() => setAiTab('paste')} className="w-full">
+                                    Weiter zu Schritt 2 →
+                                </Button>
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="paste">
+                            <div className="space-y-4">
+                                <p className="text-sm text-muted-foreground">
+                                    Füge die KI-Antwort (JSON) hier ein:
+                                </p>
+                                <Textarea
+                                    placeholder='{"rules": [...], "newFoods": [...], "newRecipes": [...]}'
+                                    value={jsonInput}
+                                    onChange={(e) => { setJsonInput(e.target.value); setAiError(null) }}
+                                    className="min-h-[300px] font-mono text-xs"
+                                />
+                                {aiError && (
+                                    <div className="flex items-start gap-2 text-destructive text-sm bg-destructive/10 rounded-lg p-3">
+                                        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                                        {aiError}
+                                    </div>
+                                )}
+                                <Button onClick={handleParseAI} disabled={!jsonInput.trim()} className="w-full gap-2">
+                                    <Sparkles className="h-4 w-4" />
+                                    Analysieren & Vorschau
+                                </Button>
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="preview">
+                            {previewData && (
+                                <div className="space-y-4 max-h-[50vh] overflow-y-auto">
+                                    {/* Rules Preview */}
+                                    <div>
+                                        <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                                            <Badge>Rotationsregeln</Badge>
+                                            <span className="text-muted-foreground font-normal">
+                                                {previewData.rules.length} Regeln
+                                            </span>
+                                        </h3>
+                                        <div className="space-y-2">
+                                            {previewData.rules.map((rule, i) => (
+                                                <div key={i} className="bg-muted/30 rounded-lg p-3 flex items-center gap-3">
+                                                    <Badge variant="outline">{SLOT_LABELS[rule.slotId] ?? rule.slotId}</Badge>
+                                                    <span className="text-sm">
+                                                        Alle {rule.intervalDays} Tage: {rule.recipeNames.join(' → ')}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* New Recipes */}
+                                    {previewData.newRecipes && previewData.newRecipes.length > 0 && (
+                                        <div>
+                                            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                                                <Badge variant="secondary">Neue Rezepte</Badge>
+                                                <span className="text-muted-foreground font-normal">
+                                                    {previewData.newRecipes.length} Rezepte
+                                                </span>
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {previewData.newRecipes.map((r, i) => (
+                                                    <div key={i} className="bg-muted/30 rounded-lg p-3">
+                                                        <p className="font-medium text-sm mb-1">{r.name}</p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {r.ingredients.map((ing) => `${ing.grams}g ${ing.foodName}`).join(', ')}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* New Foods */}
+                                    {previewData.newFoods && previewData.newFoods.length > 0 && (
+                                        <div>
+                                            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                                                <Badge variant="secondary">Neue Foods</Badge>
+                                                <span className="text-muted-foreground font-normal">
+                                                    {previewData.newFoods.length} Lebensmittel
+                                                </span>
+                                            </h3>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {previewData.newFoods.map((f, i) => (
+                                                    <div key={i} className="bg-muted/30 rounded-lg p-2 text-xs">
+                                                        <p className="font-medium">{f.name}</p>
+                                                        <p className="text-muted-foreground">
+                                                            {f.nutritionPer100g.kcal} kcal · {f.nutritionPer100g.protein}g P
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <DialogFooter>
+                                        <Button variant="outline" onClick={() => setAiDialogOpen(false)}>Abbrechen</Button>
+                                        <Button onClick={() => saveMealPlanImport(previewData)} className="gap-2">
+                                            <Check className="h-4 w-4" />
+                                            Wochenplan übernehmen
+                                        </Button>
+                                    </DialogFooter>
+                                </div>
+                            )}
+                        </TabsContent>
+                    </Tabs>
+                </DialogContent>
+            </Dialog>
+
+            {/* ═══ Export Dialog ═══ */}
+            <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+                <DialogContent onClose={() => setExportDialogOpen(false)} className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Download className="h-5 w-5 text-primary" />
+                            Wochenplan exportieren
+                        </DialogTitle>
+                        <DialogDescription>
+                            Exportiere deinen aktuellen Wochenplan als JSON. Du kannst ihn später wieder importieren
+                            oder mit anderen teilen.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <pre className="bg-muted/50 rounded-lg p-4 text-xs font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto border border-border">
+                        {exportJson}
+                    </pre>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={handleCopyExport} className="gap-2">
+                            {exportCopied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                            {exportCopied ? 'Kopiert!' : 'Kopieren'}
+                        </Button>
+                        <Button onClick={handleDownloadExport} className="gap-2">
+                            <Download className="h-4 w-4" />
+                            Als Datei herunterladen
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ═══ Import Dialog ═══ */}
+            <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+                <DialogContent onClose={() => setImportDialogOpen(false)} className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Upload className="h-5 w-5 text-primary" />
+                            Wochenplan importieren
+                        </DialogTitle>
+                        <DialogDescription>
+                            Füge ein zuvor exportiertes JSON oder ein AI-generiertes Meal-Plan-JSON ein.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {!importPreview ? (
+                        <div className="space-y-4">
+                            <Textarea
+                                placeholder="JSON hier einfügen..."
+                                value={importJson}
+                                onChange={(e) => { setImportJson(e.target.value); setImportError(null) }}
+                                className="min-h-[250px] font-mono text-xs"
+                            />
+                            {importError && (
+                                <div className="flex items-start gap-2 text-destructive text-sm bg-destructive/10 rounded-lg p-3">
+                                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                                    {importError}
+                                </div>
+                            )}
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setImportDialogOpen(false)}>Abbrechen</Button>
+                                <Button onClick={handleParseImport} disabled={!importJson.trim()} className="gap-2">
+                                    Validieren & Vorschau
+                                </Button>
+                            </DialogFooter>
+                        </div>
+                    ) : (
+                        <div className="space-y-4 max-h-[50vh] overflow-y-auto">
+                            <h3 className="text-sm font-semibold flex items-center gap-2">
+                                <Badge>Vorschau</Badge>
+                            </h3>
+                            <div className="space-y-2">
+                                {importPreview.rules.map((rule, i) => (
+                                    <div key={i} className="bg-muted/30 rounded-lg p-3 flex items-center gap-3">
+                                        <Badge variant="outline">{SLOT_LABELS[rule.slotId] ?? rule.slotId}</Badge>
+                                        <span className="text-sm">
+                                            Alle {rule.intervalDays} Tage: {rule.recipeNames.join(' → ')}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            {importPreview.newRecipes && importPreview.newRecipes.length > 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                    + {importPreview.newRecipes.length} neue Rezepte und {importPreview.newFoods?.length ?? 0} neue Foods werden erstellt
+                                </p>
+                            )}
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setImportPreview(null)}>Zurück</Button>
+                                <Button onClick={handleSaveImport} className="gap-2">
+                                    <Check className="h-4 w-4" />
+                                    Importieren
+                                </Button>
+                            </DialogFooter>
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </div>
