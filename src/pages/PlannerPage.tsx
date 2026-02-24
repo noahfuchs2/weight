@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format, addDays, startOfWeek, isSameDay, parseISO } from 'date-fns'
 import { de } from 'date-fns/locale'
-import { Plus, Check, ChevronLeft, ChevronRight, Trash2, Sparkles, Download, Upload, Copy, AlertCircle } from 'lucide-react'
+import { Plus, Check, ChevronLeft, ChevronRight, Trash2, Sparkles, Download, Upload, Copy, AlertCircle, Utensils } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -55,7 +55,7 @@ Erstelle einen Wochenplan mit Rotationsregeln. Gib striktes JSON zurück:
 }
 
 Regeln:
-- Jeder Slot soll eine Rotationsregel mit mindestens 2 Rezepten haben
+- Jeder Slot soll eine Rotationsregel mit mindestens 2 Mahlzeiten haben
 - recipeNames in den rules müssen exakt mit den Namen in newRecipes übereinstimmen
 - Alle Zutaten (foodName) müssen in newFoods definiert sein
 - Nährwerte sind IMMER pro 100g
@@ -113,11 +113,16 @@ export function PlannerPage() {
         return recipes.find((r) => r.id === recipeId) ?? null
     }
 
-    const isLogged = (slotId: SlotId, date: Date, recipeId: string): boolean => {
+    const getLoggedEntryId = (slotId: SlotId, date: Date, recipeId: string): string | null => {
         const dateStr = format(date, 'yyyy-MM-dd')
-        return logEntries.some(
+        const entry = logEntries.find(
             (e) => e.date === dateStr && e.slotId === slotId && e.itemId === recipeId
         )
+        return entry ? entry.id : null
+    }
+
+    const handleUndoLog = async (entryId: string) => {
+        await db.logEntries.delete(entryId)
     }
 
     const handleQuickLog = async (slotId: SlotId, date: Date, recipeId: string) => {
@@ -498,46 +503,61 @@ export function PlannerPage() {
                             </div>
                             {weekDays.map((day) => {
                                 const recipe = getPlannedRecipe(slotId, day)
-                                const logged = recipe ? isLogged(slotId, day, recipe.id) : false
+                                const loggedId = recipe ? getLoggedEntryId(slotId, day, recipe.id) : null
                                 const macros = recipe ? calcRecipeNutrition(recipe, foods) : null
 
                                 return (
                                     <div
                                         key={`${slotId}-${day.toISOString()}`}
-                                        className={`rounded-lg border p-2 min-h-[80px] text-xs transition-colors ${logged
-                                            ? 'bg-primary/10 border-primary/30'
+                                        className={`relative group/slot rounded-lg border p-2 min-h-[85px] text-xs transition-colors flex flex-col ${loggedId
+                                            ? 'bg-primary/10 border-primary/40 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]'
                                             : recipe
-                                                ? 'border-border hover:border-primary/30'
-                                                : 'border-border/50 bg-muted/10'
+                                                ? 'border-border hover:border-primary/50 bg-card hover:shadow-sm'
+                                                : 'border-border/40 bg-muted/5'
                                             }`}
                                     >
                                         {recipe ? (
-                                            <div className="space-y-1">
-                                                <p className="font-medium truncate">{recipe.name}</p>
+                                            <div className="space-y-1.5 flex-1 flex flex-col">
+                                                <p className="font-medium line-clamp-2 flex items-start gap-1.5 text-foreground leading-snug">
+                                                    <Utensils className="h-3 w-3 text-primary mt-[2px] shrink-0 opacity-80" />
+                                                    {recipe.name}
+                                                </p>
                                                 {macros && (
-                                                    <p className="text-[10px] text-muted-foreground">
-                                                        {macros.kcal} kcal · {macros.protein.toFixed(0)}g P
-                                                    </p>
+                                                    <div className="mt-auto pt-1">
+                                                        <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                                                            <span className="font-medium text-foreground/70">{macros.kcal}</span> kcal · <span className="font-medium text-foreground/70">{macros.protein.toFixed(0)}g</span> P
+                                                        </p>
+                                                    </div>
                                                 )}
-                                                {logged ? (
-                                                    <Badge variant="default" className="text-[9px] gap-1">
-                                                        <Check className="h-2.5 w-2.5" />
-                                                        Geloggt
-                                                    </Badge>
+                                                {loggedId ? (
+                                                    <Button
+                                                        variant="default"
+                                                        size="sm"
+                                                        className="h-[26px] text-[10px] w-full mt-2 group-hover/slot:bg-destructive group-hover/slot:text-destructive-foreground transition-all duration-300 relative overflow-hidden font-medium"
+                                                        onClick={() => handleUndoLog(loggedId)}
+                                                    >
+                                                        <span className="flex items-center gap-1.5 group-hover/slot:-translate-y-full transition-transform duration-300 absolute inset-0 justify-center">
+                                                            <Check className="h-3 w-3" /> Geloggt
+                                                        </span>
+                                                        <span className="flex items-center gap-1.5 translate-y-full group-hover/slot:translate-y-0 transition-transform duration-300 absolute inset-0 justify-center">
+                                                            <Trash2 className="h-3 w-3" /> Rückgängig
+                                                        </span>
+                                                    </Button>
                                                 ) : (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
-                                                        className="h-6 text-[10px] w-full"
+                                                        className="h-[26px] text-[10px] w-full mt-2 bg-background/50 hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all duration-300 font-medium opacity-0 group-hover/slot:opacity-100"
                                                         onClick={() => handleQuickLog(slotId, day, recipe.id)}
                                                     >
-                                                        <Check className="h-3 w-3 mr-1" />
-                                                        Loggen
+                                                        <Check className="h-3 w-3 mr-1.5" /> Loggen
                                                     </Button>
                                                 )}
                                             </div>
                                         ) : (
-                                            <p className="text-muted-foreground/50 italic">—</p>
+                                            <div className="flex-1 flex flex-col items-center justify-center opacity-30 group-hover/slot:opacity-60 transition-opacity">
+                                                <p className="text-[10px] font-medium tracking-wide uppercase">—</p>
+                                            </div>
                                         )}
                                     </div>
                                 )
@@ -574,7 +594,7 @@ export function PlannerPage() {
                             </div>
                         </div>
                         <div>
-                            <Label className="mb-2 block">Rezepte (min. 2 auswählen)</Label>
+                            <Label className="mb-2 block">Mahlzeiten (min. 2 auswählen)</Label>
                             <div className="space-y-1 max-h-48 overflow-y-auto">
                                 {recipes.map((r) => {
                                     const selected = ruleRecipeIds.includes(r.id)
@@ -600,7 +620,7 @@ export function PlannerPage() {
                                 })}
                                 {recipes.length === 0 && (
                                     <p className="text-sm text-muted-foreground p-3 text-center">
-                                        Erstelle zuerst Rezepte in der Library
+                                        Erstelle zuerst Mahlzeiten in der Library
                                     </p>
                                 )}
                             </div>
@@ -722,9 +742,9 @@ export function PlannerPage() {
                                     {previewData.newRecipes && previewData.newRecipes.length > 0 && (
                                         <div>
                                             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                                                <Badge variant="secondary">Neue Rezepte</Badge>
+                                                <Badge variant="secondary">Neue Mahlzeiten</Badge>
                                                 <span className="text-muted-foreground font-normal">
-                                                    {previewData.newRecipes.length} Rezepte
+                                                    {previewData.newRecipes.length} Mahlzeiten
                                                 </span>
                                             </h3>
                                             <div className="space-y-2">
@@ -744,9 +764,9 @@ export function PlannerPage() {
                                     {previewData.newFoods && previewData.newFoods.length > 0 && (
                                         <div>
                                             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                                                <Badge variant="secondary">Neue Foods</Badge>
+                                                <Badge variant="secondary">Neue Zutaten</Badge>
                                                 <span className="text-muted-foreground font-normal">
-                                                    {previewData.newFoods.length} Lebensmittel
+                                                    {previewData.newFoods.length} Zutaten
                                                 </span>
                                             </h3>
                                             <div className="grid grid-cols-2 gap-2">

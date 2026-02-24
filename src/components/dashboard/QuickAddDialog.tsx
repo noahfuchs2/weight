@@ -74,8 +74,8 @@ export function QuickAddDialog({ selectedDate }: QuickAddDialogProps) {
                                         key={s}
                                         onClick={() => setSlotId(s)}
                                         className={`px-2 py-1.5 text-xs rounded-md transition-colors cursor-pointer ${slotId === s
-                                                ? 'bg-primary text-primary-foreground'
-                                                : 'bg-muted text-muted-foreground hover:bg-accent'
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'bg-muted text-muted-foreground hover:bg-accent'
                                             }`}
                                     >
                                         {SLOT_LABELS[s]}
@@ -93,14 +93,14 @@ export function QuickAddDialog({ selectedDate }: QuickAddDialogProps) {
                                     className={`flex-1 py-2 text-sm rounded-lg transition-colors cursor-pointer ${itemType === 'food' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
                                         }`}
                                 >
-                                    Food
+                                    Zutat
                                 </button>
                                 <button
                                     onClick={() => { setItemType('recipe'); setSelectedItemId(''); setSearch('') }}
                                     className={`flex-1 py-2 text-sm rounded-lg transition-colors cursor-pointer ${itemType === 'recipe' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
                                         }`}
                                 >
-                                    Rezept
+                                    Mahlzeit
                                 </button>
                             </div>
                         </div>
@@ -108,7 +108,7 @@ export function QuickAddDialog({ selectedDate }: QuickAddDialogProps) {
                         {/* Search & Select */}
                         <div>
                             <Label className="mb-2 block">
-                                {itemType === 'food' ? 'Lebensmittel' : 'Rezept'} auswählen
+                                {itemType === 'food' ? 'Zutat' : 'Mahlzeit'} auswählen
                             </Label>
                             <Input
                                 placeholder="Suchen..."
@@ -125,8 +125,8 @@ export function QuickAddDialog({ selectedDate }: QuickAddDialogProps) {
                                             key={item.id}
                                             onClick={() => setSelectedItemId(item.id)}
                                             className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${selectedItemId === item.id
-                                                    ? 'bg-primary/15 text-primary'
-                                                    : 'hover:bg-muted'
+                                                ? 'bg-primary/15 text-primary'
+                                                : 'hover:bg-muted'
                                                 }`}
                                         >
                                             {item.name}

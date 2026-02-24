@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Trash2, Pencil, Check, X, UtensilsCrossed } from 'lucide-react'
+import { Trash2, Pencil, Check, X, UtensilsCrossed, Carrot, Utensils } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -92,8 +92,15 @@ export function MealSlotCard({ slotId, entries }: MealSlotCardProps) {
                                 className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30 hover:bg-muted/60 transition-colors group/item"
                             >
                                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <Badge variant="outline" className="text-[10px] shrink-0">
-                                        {entry.itemType === 'food' ? 'Food' : 'Rezept'}
+                                    <Badge
+                                        variant={entry.itemType === 'food' ? 'outline' : 'secondary'}
+                                        className={`text-[10px] shrink-0 gap-1 flex items-center ${entry.itemType === 'food' ? 'border-orange-500/30 bg-orange-500/10' : 'bg-primary/20 text-primary-foreground'}`}
+                                    >
+                                        {entry.itemType === 'food' ? (
+                                            <><Carrot className="h-3 w-3 text-orange-500" /> Zutat</>
+                                        ) : (
+                                            <><Utensils className="h-3 w-3 text-primary" /> Mahlzeit</>
+                                        )}
                                     </Badge>
                                     <span className="text-sm font-medium truncate">{entry.name}</span>
                                 </div>

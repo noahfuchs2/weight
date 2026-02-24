@@ -146,7 +146,7 @@ export function AIImportPage() {
                     AI Import
                 </h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                    Nutze ChatGPT oder Gemini, um Lebensmittel aus Fotos zu erkennen
+                    Nutze ChatGPT oder Gemini, um Zutaten aus Fotos zu erkennen
                 </p>
             </div>
 
@@ -223,7 +223,7 @@ export function AIImportPage() {
                         {editableData?.newFoods && editableData.newFoods.length > 0 && (
                             <div>
                                 <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                                    <Badge>Neue Foods</Badge>
+                                    <Badge>Neue Zutaten</Badge>
                                     <span className="text-muted-foreground font-normal">
                                         {editableData.newFoods.length} erkannt
                                     </span>

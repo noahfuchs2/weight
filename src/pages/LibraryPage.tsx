@@ -52,8 +52,8 @@ export function LibraryPage() {
             <Tabs value={tab} onValueChange={setTab}>
                 <div className="flex items-center justify-between">
                     <TabsList>
-                        <TabsTrigger value="foods">Foods ({foods.length})</TabsTrigger>
-                        <TabsTrigger value="recipes">Rezepte ({recipes.length})</TabsTrigger>
+                        <TabsTrigger value="foods">Zutaten ({foods.length})</TabsTrigger>
+                        <TabsTrigger value="recipes">Mahlzeiten ({recipes.length})</TabsTrigger>
                     </TabsList>
 
                     <div className="flex items-center gap-3">
@@ -79,7 +79,7 @@ export function LibraryPage() {
                             className="gap-2"
                         >
                             <Plus className="h-4 w-4" />
-                            {tab === 'foods' ? 'Neues Food' : 'Neues Rezept'}
+                            {tab === 'foods' ? 'Neue Zutat' : 'Neue Mahlzeit'}
                         </Button>
                     </div>
                 </div>
