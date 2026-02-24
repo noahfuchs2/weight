@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { LayoutDashboard, BookOpen, Sparkles, CalendarDays } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAppStore } from '@/stores/appStore'
 
 const NAV_ITEMS = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -11,6 +12,7 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
     const location = useLocation()
+    const { dailyGoals } = useAppStore()
 
     return (
         <div className="flex h-screen overflow-hidden">
@@ -49,8 +51,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {/* Footer */}
                 <div className="p-4 border-t border-sidebar-border">
                     <div className="text-xs text-muted-foreground">
-                        <p>Ziel: <span className="text-foreground font-medium">3.500 kcal</span></p>
-                        <p>Protein: <span className="text-foreground font-medium">180g</span></p>
+                        <p>Ziel: <span className="text-foreground font-medium">{dailyGoals.kcal.toLocaleString('de-DE')} kcal</span></p>
+                        <p>Protein: <span className="text-foreground font-medium">{dailyGoals.protein}g</span></p>
                     </div>
                 </div>
             </aside>

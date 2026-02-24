@@ -12,12 +12,14 @@ export const SLOT_LABELS: Record<SlotId, string> = {
     evening: 'Abends',
 }
 
-export const SLOT_TARGETS: Record<SlotId, { kcal: number; protein: number }> = {
-    morning: { kcal: 850, protein: 40 },
-    noon: { kcal: 750, protein: 45 },
-    afternoon: { kcal: 500, protein: 25 },
-    late_afternoon: { kcal: 650, protein: 35 },
-    evening: { kcal: 750, protein: 35 },
+export const getSlotTargets = (dailyKcal: number, dailyProtein: number): Record<SlotId, { kcal: number; protein: number }> => {
+    return {
+        morning: { kcal: Math.round(dailyKcal * 0.24), protein: Math.round(dailyProtein * 0.22) },   // ~850/3500, 40/180
+        noon: { kcal: Math.round(dailyKcal * 0.21), protein: Math.round(dailyProtein * 0.25) },      // ~750/3500, 45/180
+        afternoon: { kcal: Math.round(dailyKcal * 0.14), protein: Math.round(dailyProtein * 0.14) }, // ~500/3500, 25/180
+        late_afternoon: { kcal: Math.round(dailyKcal * 0.19), protein: Math.round(dailyProtein * 0.19) }, // ~650/3500, 35/180
+        evening: { kcal: Math.round(dailyKcal * 0.22), protein: Math.round(dailyProtein * 0.20) },   // ~750/3500, 35/180
+    }
 }
 
 // ─── Nutrition per 100g ───

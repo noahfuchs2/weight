@@ -4,6 +4,7 @@ import { DateNavigator } from '@/components/dashboard/DateNavigator'
 import { DailyProgress } from '@/components/dashboard/DailyProgress'
 import { MealSlotCard } from '@/components/dashboard/MealSlotCard'
 import { QuickAddDialog } from '@/components/dashboard/QuickAddDialog'
+import { GoalSettingsDialog } from '@/components/dashboard/GoalSettingsDialog'
 
 export function DashboardPage() {
     const selectedDate = useAppStore((s) => s.selectedDate)
@@ -18,6 +19,7 @@ export function DashboardPage() {
                     <p className="text-sm text-muted-foreground mt-0.5">Dein tägliches Tracking auf einen Blick</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <GoalSettingsDialog />
                     <DateNavigator />
                     <QuickAddDialog selectedDate={selectedDate} />
                 </div>

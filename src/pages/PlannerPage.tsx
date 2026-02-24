@@ -14,18 +14,22 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { db } from '@/db/database'
 import { SLOT_LABELS, type SlotId, AIMealPlanImportSchema, type AIMealPlanImport, type MealPlanExport } from '@/db/schemas'
 import type { RotationRule, Recipe } from '@/db/schemas'
-import { ORDERED_SLOTS } from '@/stores/appStore'
+import { useAppStore, ORDERED_SLOTS } from '@/stores/appStore'
+import { getSlotTargets } from '@/db/schemas'
 import { generateId } from '@/lib/utils'
 import { calcRecipeNutrition } from '@/hooks/useDailyLog'
 
 // ─── AI Prompt for Meal Plan Generation ───
-const MEALPLAN_AI_PROMPT = `Du bist ein Ernährungsplan-Assistent für einen 17-jährigen Sportler (1,81m) der Muskeln aufbauen möchte.
-Ziel: 3.500 kcal und 180g Protein pro Tag, aufgeteilt auf 5 Mahlzeiten:
-- morning (Morgens): ~850 kcal, 40g Protein
-- noon (Mittags): ~750 kcal, 45g Protein  
-- afternoon (Nachmittags): ~500 kcal, 25g Protein
-- late_afternoon (Spät Nachmittags): ~650 kcal, 35g Protein
-- evening (Abends): ~750 kcal, 35g Protein
+const generateAiPrompt = (
+    dailyGoals: { kcal: number; protein: number },
+    targets: ReturnType<typeof getSlotTargets>
+) => `Du bist ein Ernährungsplan-Assistent für einen 17-jährigen Sportler (1,81m) der Muskeln aufbauen möchte.
+Ziel: ${dailyGoals.kcal.toLocaleString('de-DE')} kcal und ${dailyGoals.protein}g Protein pro Tag, aufgeteilt auf 5 Mahlzeiten:
+- morning (Morgens): ~${targets.morning.kcal} kcal, ${targets.morning.protein}g Protein
+- noon (Mittags): ~${targets.noon.kcal} kcal, ${targets.noon.protein}g Protein  
+- afternoon (Nachmittags): ~${targets.afternoon.kcal} kcal, ${targets.afternoon.protein}g Protein
+- late_afternoon (Spät Nachmittags): ~${targets.late_afternoon.kcal} kcal, ${targets.late_afternoon.protein}g Protein
+- evening (Abends): ~${targets.evening.kcal} kcal, ${targets.evening.protein}g Protein
 
 Erstelle einen Wochenplan mit Rotationsregeln. Gib striktes JSON zurück:
 
@@ -64,6 +68,7 @@ Regeln:
 - Gib NUR valides JSON zurück, keine Erklärungen`
 
 export function PlannerPage() {
+    const { dailyGoals } = useAppStore()
     const [weekOffset, setWeekOffset] = useState(0)
     const [ruleDialogOpen, setRuleDialogOpen] = useState(false)
     const [ruleSlot, setRuleSlot] = useState<SlotId>('noon')
@@ -170,8 +175,10 @@ export function PlannerPage() {
     }
 
     // ─── AI Prompt Copy ───
+    const currentPrompt = generateAiPrompt(dailyGoals, getSlotTargets(dailyGoals.kcal, dailyGoals.protein))
+
     const handleCopyPrompt = async () => {
-        await navigator.clipboard.writeText(MEALPLAN_AI_PROMPT)
+        await navigator.clipboard.writeText(currentPrompt)
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
     }
@@ -673,7 +680,7 @@ export function PlannerPage() {
                                 </p>
                                 <div className="relative">
                                     <pre className="bg-muted/50 rounded-lg p-4 text-xs font-mono whitespace-pre-wrap max-h-[350px] overflow-y-auto border border-border">
-                                        {MEALPLAN_AI_PROMPT}
+                                        {currentPrompt}
                                     </pre>
                                     <Button
                                         variant="outline"

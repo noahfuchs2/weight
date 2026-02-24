@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
-import { SLOT_LABELS, SLOT_TARGETS, type SlotId } from '@/db/schemas'
+import { SLOT_LABELS, type SlotId, getSlotTargets } from '@/db/schemas'
+import { useAppStore } from '@/stores/appStore'
 import type { ResolvedLogEntry } from '@/hooks/useDailyLog'
 import { db } from '@/db/database'
 
@@ -17,7 +18,8 @@ interface MealSlotCardProps {
 export function MealSlotCard({ slotId, entries }: MealSlotCardProps) {
     const [editingId, setEditingId] = useState<string | null>(null)
     const [editValue, setEditValue] = useState('')
-    const target = SLOT_TARGETS[slotId]
+    const { dailyGoals } = useAppStore()
+    const target = getSlotTargets(dailyGoals.kcal, dailyGoals.protein)[slotId]
 
     const slotTotals = entries.reduce(
         (acc, e) => ({
