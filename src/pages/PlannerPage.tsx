@@ -12,8 +12,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { db } from '@/db/database'
-import { SLOT_LABELS, type SlotId, AIMealPlanImportSchema, type AIMealPlanImport, type MealPlanExport } from '@/db/schemas'
-import type { RotationRule, Recipe } from '@/db/schemas'
+import { SLOT_LABELS, type SlotId, AIMealPlanImportSchema, type AIMealPlanImport, type MealPlanExport, type MealRuleType } from '@/db/schemas'
+import type { MealRule, Recipe } from '@/db/schemas'
 import { useAppStore, ORDERED_SLOTS } from '@/stores/appStore'
 import { getSlotTargets } from '@/db/schemas'
 import { generateId } from '@/lib/utils'
@@ -31,13 +31,30 @@ Ziel: ${dailyGoals.kcal.toLocaleString('de-DE')} kcal und ${dailyGoals.protein}g
 - late_afternoon (Spät Nachmittags): ~${targets.late_afternoon.kcal} kcal, ${targets.late_afternoon.protein}g Protein
 - evening (Abends): ~${targets.evening.kcal} kcal, ${targets.evening.protein}g Protein
 
-Erstelle einen Wochenplan mit Rotationsregeln. Gib striktes JSON zurück:
+Erstelle einen flexiblen Wochenplan. Es gibt 3 Regeltypen:
+1. "fixed" — Jeden Tag dasselbe Gericht
+2. "weekday" — Unterschiedliche Gerichte für Mo–Fr und Sa–So
+3. "rotation" — Gerichte rotieren alle N Tage
+
+Gib striktes JSON zurück:
 
 {
   "rules": [
     {
       "slotId": "morning|noon|afternoon|late_afternoon|evening",
-      "recipeNames": ["Rezept A", "Rezept B"],
+      "type": "fixed",
+      "recipeNames": ["Rezept A"]
+    },
+    {
+      "slotId": "noon",
+      "type": "weekday",
+      "weekdayRecipeNames": ["Rezept B"],
+      "weekendRecipeNames": ["Rezept C"]
+    },
+    {
+      "slotId": "evening",
+      "type": "rotation",
+      "recipeNames": ["Rezept D", "Rezept E"],
       "intervalDays": 2
     }
   ],
@@ -59,12 +76,14 @@ Erstelle einen Wochenplan mit Rotationsregeln. Gib striktes JSON zurück:
 }
 
 Regeln:
-- Jeder Slot soll eine Rotationsregel mit mindestens 2 Mahlzeiten haben
-- recipeNames in den rules müssen exakt mit den Namen in newRecipes übereinstimmen
+- Nutze den passenden Regeltyp je nach Slot: "fixed" wenn jeden Tag dasselbe gegessen wird, "weekday" für unterschiedliche Gerichte an Wochentagen und Wochenenden, "rotation" zum Abwechseln
+- Bei "fixed": recipeNames hat genau 1 Element
+- Bei "weekday": weekdayRecipeNames (Mo–Fr) und weekendRecipeNames (Sa–So) verwenden
+- Bei "rotation": recipeNames mit 2+ Elementen und intervalDays angeben
+- recipeNames/weekdayRecipeNames/weekendRecipeNames müssen exakt mit den Namen in newRecipes übereinstimmen
 - Alle Zutaten (foodName) müssen in newFoods definiert sein
 - Nährwerte sind IMMER pro 100g
 - Verwende deutsche Lebensmittelnamen
-- intervalDays = wie oft gewechselt wird (z.B. 2 = alle 2 Tage)
 - Gib NUR valides JSON zurück, keine Erklärungen`
 
 export function PlannerPage() {
@@ -72,9 +91,12 @@ export function PlannerPage() {
     const [weekOffset, setWeekOffset] = useState(0)
     const [ruleDialogOpen, setRuleDialogOpen] = useState(false)
     const [ruleSlot, setRuleSlot] = useState<SlotId>('noon')
+    const [ruleType, setRuleType] = useState<MealRuleType>('fixed')
     const [ruleRecipeIds, setRuleRecipeIds] = useState<string[]>([])
+    const [ruleWeekdayRecipeIds, setRuleWeekdayRecipeIds] = useState<string[]>([])
+    const [ruleWeekendRecipeIds, setRuleWeekendRecipeIds] = useState<string[]>([])
     const [ruleInterval, setRuleInterval] = useState('2')
-    const [editingRule, setEditingRule] = useState<RotationRule | null>(null)
+    const [editingRule, setEditingRule] = useState<MealRule | null>(null)
 
     // AI Import state
     const [aiDialogOpen, setAiDialogOpen] = useState(false)
@@ -97,7 +119,7 @@ export function PlannerPage() {
 
     const recipes = useLiveQuery(() => db.recipes.toArray()) ?? []
     const foods = useLiveQuery(() => db.foods.toArray()) ?? []
-    const rules = useLiveQuery(() => db.rotationRules.toArray()) ?? []
+    const rules = useLiveQuery(() => db.mealRules.toArray()) ?? []
     const logEntries = useLiveQuery(() => db.logEntries.toArray()) ?? []
 
     const today = new Date()
@@ -106,15 +128,37 @@ export function PlannerPage() {
 
     const getPlannedRecipe = (slotId: SlotId, date: Date): Recipe | null => {
         const rule = rules.find((r) => r.slotId === slotId)
-        if (!rule || rule.recipeIds.length === 0) return null
+        if (!rule) return null
 
-        const startDate = parseISO(rule.startDate)
-        const daysDiff = Math.floor((date.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-        const cycleLength = rule.intervalDays * rule.recipeIds.length
-        const cyclePosition = ((daysDiff % cycleLength) + cycleLength) % cycleLength
-        const recipeIndex = Math.floor(cyclePosition / rule.intervalDays)
-        const recipeId = rule.recipeIds[recipeIndex]
+        let recipeId: string | undefined
 
+        switch (rule.type) {
+            case 'fixed': {
+                recipeId = rule.recipeIds?.[0]
+                break
+            }
+            case 'weekday': {
+                const dayOfWeek = date.getDay() // 0=Sun, 6=Sat
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+                const ids = isWeekend ? rule.weekendRecipeIds : rule.weekdayRecipeIds
+                recipeId = ids?.[0]
+                break
+            }
+            case 'rotation': {
+                const ids = rule.recipeIds ?? []
+                if (ids.length === 0) return null
+                const interval = rule.intervalDays ?? 1
+                const startDate = parseISO(rule.startDate)
+                const daysDiff = Math.floor((date.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
+                const cycleLength = interval * ids.length
+                const cyclePosition = ((daysDiff % cycleLength) + cycleLength) % cycleLength
+                const recipeIndex = Math.floor(cyclePosition / interval)
+                recipeId = ids[recipeIndex]
+                break
+            }
+        }
+
+        if (!recipeId) return null
         return recipes.find((r) => r.id === recipeId) ?? null
     }
 
@@ -141,36 +185,51 @@ export function PlannerPage() {
         })
     }
 
+    const canSaveRule = (): boolean => {
+        switch (ruleType) {
+            case 'fixed': return ruleRecipeIds.length === 1
+            case 'weekday': return ruleWeekdayRecipeIds.length >= 1 && ruleWeekendRecipeIds.length >= 1
+            case 'rotation': return ruleRecipeIds.length >= 2
+        }
+    }
+
     const handleSaveRule = async () => {
-        if (ruleRecipeIds.length < 2) return
-        const rule: RotationRule = {
+        if (!canSaveRule()) return
+        const rule: MealRule = {
             id: editingRule?.id ?? generateId(),
             slotId: ruleSlot,
-            recipeIds: ruleRecipeIds,
-            intervalDays: parseInt(ruleInterval) || 2,
-            startDate: format(today, 'yyyy-MM-dd'),
+            type: ruleType,
+            ...(ruleType === 'fixed' ? { recipeIds: ruleRecipeIds } : {}),
+            ...(ruleType === 'weekday' ? { weekdayRecipeIds: ruleWeekdayRecipeIds, weekendRecipeIds: ruleWeekendRecipeIds } : {}),
+            ...(ruleType === 'rotation' ? { recipeIds: ruleRecipeIds, intervalDays: parseInt(ruleInterval) || 2 } : {}),
+            startDate: editingRule?.startDate ?? format(today, 'yyyy-MM-dd'),
         }
         if (editingRule) {
-            await db.rotationRules.update(rule.id, rule)
+            await db.mealRules.update(rule.id, rule)
         } else {
             const existing = rules.find((r) => r.slotId === ruleSlot)
-            if (existing) await db.rotationRules.delete(existing.id)
-            await db.rotationRules.add(rule)
+            if (existing) await db.mealRules.delete(existing.id)
+            await db.mealRules.add(rule)
         }
         setRuleDialogOpen(false)
         setRuleRecipeIds([])
+        setRuleWeekdayRecipeIds([])
+        setRuleWeekendRecipeIds([])
         setEditingRule(null)
     }
 
     const handleDeleteRule = async (ruleId: string) => {
-        await db.rotationRules.delete(ruleId)
+        await db.mealRules.delete(ruleId)
     }
 
-    const openEditRule = (rule: RotationRule) => {
+    const openEditRule = (rule: MealRule) => {
         setEditingRule(rule)
         setRuleSlot(rule.slotId)
-        setRuleRecipeIds([...rule.recipeIds])
-        setRuleInterval(String(rule.intervalDays))
+        setRuleType(rule.type)
+        setRuleRecipeIds([...(rule.recipeIds ?? [])])
+        setRuleWeekdayRecipeIds([...(rule.weekdayRecipeIds ?? [])])
+        setRuleWeekendRecipeIds([...(rule.weekendRecipeIds ?? [])])
+        setRuleInterval(String(rule.intervalDays ?? 2))
         setRuleDialogOpen(true)
     }
 
@@ -244,24 +303,43 @@ export function PlannerPage() {
             }
         }
 
-        // 3. Create rotation rules
+        // 3. Create meal rules
         for (const rule of data.rules) {
-            const recipeIds = rule.recipeNames
-                .map((name) => recipeNameToId.get(name.toLowerCase()) ?? '')
-                .filter((id) => id !== '')
-            if (recipeIds.length === 0) continue
+            const resolveNames = (names?: string[]) =>
+                (names ?? []).map((name) => recipeNameToId.get(name.toLowerCase()) ?? '').filter((id) => id !== '')
 
             // Remove existing rule for this slot
             const existing = rules.find((r) => r.slotId === rule.slotId)
-            if (existing) await db.rotationRules.delete(existing.id)
+            if (existing) await db.mealRules.delete(existing.id)
 
-            await db.rotationRules.add({
+            const base = {
                 id: generateId(),
                 slotId: rule.slotId,
-                recipeIds,
-                intervalDays: rule.intervalDays,
+                type: rule.type,
                 startDate: format(today, 'yyyy-MM-dd'),
-            })
+            }
+
+            switch (rule.type) {
+                case 'fixed': {
+                    const recipeIds = resolveNames(rule.recipeNames)
+                    if (recipeIds.length === 0) continue
+                    await db.mealRules.add({ ...base, recipeIds })
+                    break
+                }
+                case 'weekday': {
+                    const weekdayRecipeIds = resolveNames(rule.weekdayRecipeNames)
+                    const weekendRecipeIds = resolveNames(rule.weekendRecipeNames)
+                    if (weekdayRecipeIds.length === 0 && weekendRecipeIds.length === 0) continue
+                    await db.mealRules.add({ ...base, weekdayRecipeIds, weekendRecipeIds })
+                    break
+                }
+                case 'rotation': {
+                    const recipeIds = resolveNames(rule.recipeNames)
+                    if (recipeIds.length === 0) continue
+                    await db.mealRules.add({ ...base, recipeIds, intervalDays: rule.intervalDays ?? 2 })
+                    break
+                }
+            }
         }
 
         setAiDialogOpen(false)
@@ -270,19 +348,45 @@ export function PlannerPage() {
     }
 
     // ─── Export ───
+    const getAllRuleRecipeIds = (rule: MealRule): string[] => {
+        const ids: string[] = []
+        if (rule.recipeIds) ids.push(...rule.recipeIds)
+        if (rule.weekdayRecipeIds) ids.push(...rule.weekdayRecipeIds)
+        if (rule.weekendRecipeIds) ids.push(...rule.weekendRecipeIds)
+        return ids
+    }
+
     const handleExport = () => {
         const exportData: MealPlanExport = {
             exportedAt: new Date().toISOString(),
-            rules: rules.map((rule) => ({
-                slot: SLOT_LABELS[rule.slotId],
-                slotId: rule.slotId,
-                recipeNames: rule.recipeIds
-                    .map((id) => recipes.find((r) => r.id === id)?.name ?? '')
-                    .filter((n) => n !== ''),
-                intervalDays: rule.intervalDays,
-            })),
+            rules: rules.map((rule) => {
+                const base = {
+                    slot: SLOT_LABELS[rule.slotId],
+                    slotId: rule.slotId,
+                    type: rule.type,
+                }
+                switch (rule.type) {
+                    case 'fixed':
+                        return {
+                            ...base,
+                            recipeNames: (rule.recipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '').filter(Boolean),
+                        }
+                    case 'weekday':
+                        return {
+                            ...base,
+                            weekdayRecipeNames: (rule.weekdayRecipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '').filter(Boolean),
+                            weekendRecipeNames: (rule.weekendRecipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '').filter(Boolean),
+                        }
+                    case 'rotation':
+                        return {
+                            ...base,
+                            recipeNames: (rule.recipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '').filter(Boolean),
+                            intervalDays: rule.intervalDays,
+                        }
+                }
+            }),
             recipes: recipes
-                .filter((r) => rules.some((rule) => rule.recipeIds.includes(r.id)))
+                .filter((r) => rules.some((rule) => getAllRuleRecipeIds(rule).includes(r.id)))
                 .map((r) => ({
                     name: r.name,
                     ingredients: r.ingredients.map((ing) => ({
@@ -293,7 +397,7 @@ export function PlannerPage() {
             foods: foods
                 .filter((f) =>
                     recipes.some((r) =>
-                        rules.some((rule) => rule.recipeIds.includes(r.id)) &&
+                        rules.some((rule) => getAllRuleRecipeIds(rule).includes(r.id)) &&
                         r.ingredients.some((ing) => ing.foodId === f.id)
                     )
                 )
@@ -332,9 +436,12 @@ export function PlannerPage() {
             if (raw.exportedAt && raw.rules) {
                 // It's an export format — convert to import format
                 const converted: AIMealPlanImport = {
-                    rules: raw.rules.map((r: { slotId: SlotId; recipeNames: string[]; intervalDays: number }) => ({
+                    rules: raw.rules.map((r: any) => ({
                         slotId: r.slotId,
+                        type: r.type ?? 'rotation',
                         recipeNames: r.recipeNames,
+                        weekdayRecipeNames: r.weekdayRecipeNames,
+                        weekendRecipeNames: r.weekendRecipeNames,
                         intervalDays: r.intervalDays,
                     })),
                     newFoods: raw.foods?.map((f: { name: string; nutritionPer100g: { kcal: number; protein: number; carbs: number; fat: number } }) => ({
@@ -380,7 +487,7 @@ export function PlannerPage() {
                 <div>
                     <h1 className="text-2xl font-bold">Wochenplan</h1>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                        Plane deine Mahlzeiten mit Rotationsregeln
+                        Plane deine Mahlzeiten mit flexiblen Regeln
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -408,7 +515,10 @@ export function PlannerPage() {
                     onClick={() => {
                         setEditingRule(null)
                         setRuleSlot('noon')
+                        setRuleType('fixed')
                         setRuleRecipeIds([])
+                        setRuleWeekdayRecipeIds([])
+                        setRuleWeekendRecipeIds([])
                         setRuleInterval('2')
                         setRuleDialogOpen(true)
                     }}
@@ -458,31 +568,45 @@ export function PlannerPage() {
             {rules.length > 0 && (
                 <Card>
                     <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Aktive Rotationsregeln</CardTitle>
+                        <CardTitle className="text-base">Aktive Regeln</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-2">
-                            {rules.map((rule) => (
-                                <div key={rule.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-4 py-2.5">
-                                    <div className="flex items-center gap-3">
-                                        <Badge variant="outline">{SLOT_LABELS[rule.slotId]}</Badge>
-                                        <span className="text-sm">
-                                            Alle {rule.intervalDays} Tage wechseln:{' '}
-                                            {rule.recipeIds
-                                                .map((id) => recipes.find((r) => r.id === id)?.name ?? '?')
-                                                .join(' → ')}
-                                        </span>
+                            {rules.map((rule) => {
+                                let description = ''
+                                switch (rule.type) {
+                                    case 'fixed':
+                                        description = `Jeden Tag: ${(rule.recipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '?').join(', ')}`
+                                        break
+                                    case 'weekday': {
+                                        const wdNames = (rule.weekdayRecipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '?').join(', ')
+                                        const weNames = (rule.weekendRecipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '?').join(', ')
+                                        description = `Mo\u2013Fr: ${wdNames} | Sa\u2013So: ${weNames}`
+                                        break
+                                    }
+                                    case 'rotation':
+                                        description = `Alle ${rule.intervalDays} Tage wechseln: ${(rule.recipeIds ?? []).map((id) => recipes.find((r) => r.id === id)?.name ?? '?').join(' \u2192 ')}`
+                                        break
+                                }
+                                const typeLabel = rule.type === 'fixed' ? 'T\u00e4glich' : rule.type === 'weekday' ? 'Wochentage' : 'Rotation'
+                                return (
+                                    <div key={rule.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-4 py-2.5">
+                                        <div className="flex items-center gap-3">
+                                            <Badge variant="outline">{SLOT_LABELS[rule.slotId]}</Badge>
+                                            <Badge variant="secondary" className="text-[10px]">{typeLabel}</Badge>
+                                            <span className="text-sm">{description}</span>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <Button variant="ghost" size="sm" onClick={() => openEditRule(rule)}>
+                                                Bearbeiten
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteRule(rule.id)}>
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-1">
-                                        <Button variant="ghost" size="sm" onClick={() => openEditRule(rule)}>
-                                            Bearbeiten
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteRule(rule.id)}>
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
+                                )
+                            })}
                         </div>
                     </CardContent>
                 </Card>
@@ -579,7 +703,7 @@ export function PlannerPage() {
                 <DialogContent onClose={() => setRuleDialogOpen(false)}>
                     <DialogHeader>
                         <DialogTitle>
-                            {editingRule ? 'Rotationsregel bearbeiten' : 'Neue Rotationsregel'}
+                            {editingRule ? 'Regel bearbeiten' : 'Neue Regel'}
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
@@ -601,51 +725,135 @@ export function PlannerPage() {
                             </div>
                         </div>
                         <div>
-                            <Label className="mb-2 block">Mahlzeiten (min. 2 auswählen)</Label>
-                            <div className="space-y-1 max-h-48 overflow-y-auto">
-                                {recipes.map((r) => {
-                                    const selected = ruleRecipeIds.includes(r.id)
-                                    return (
-                                        <button
-                                            key={r.id}
-                                            onClick={() => {
-                                                if (selected) {
-                                                    setRuleRecipeIds(ruleRecipeIds.filter((id) => id !== r.id))
-                                                } else {
-                                                    setRuleRecipeIds([...ruleRecipeIds, r.id])
-                                                }
-                                            }}
-                                            className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors cursor-pointer flex items-center justify-between ${selected
-                                                ? 'bg-primary/15 text-primary'
-                                                : 'hover:bg-muted'
-                                                }`}
-                                        >
-                                            {r.name}
-                                            {selected && <Check className="h-4 w-4" />}
-                                        </button>
-                                    )
-                                })}
-                                {recipes.length === 0 && (
-                                    <p className="text-sm text-muted-foreground p-3 text-center">
-                                        Erstelle zuerst Mahlzeiten in der Library
-                                    </p>
-                                )}
+                            <Label className="mb-2 block">Regeltyp</Label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                                {([['fixed', 'T\u00e4glich'], ['weekday', 'Wochentage'], ['rotation', 'Rotation']] as const).map(([type, label]) => (
+                                    <button
+                                        key={type}
+                                        onClick={() => setRuleType(type)}
+                                        className={`px-3 py-2 text-xs rounded-md transition-colors cursor-pointer ${ruleType === type
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'bg-muted text-muted-foreground hover:bg-accent'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
                             </div>
+                            <p className="text-xs text-muted-foreground mt-1.5">
+                                {ruleType === 'fixed' && 'Jeden Tag dasselbe Gericht'}
+                                {ruleType === 'weekday' && 'Unterschiedliche Gerichte f\u00fcr Mo\u2013Fr und Sa\u2013So'}
+                                {ruleType === 'rotation' && 'Gerichte rotieren alle N Tage'}
+                            </p>
                         </div>
-                        <div>
-                            <Label className="mb-2 block">Alle N Tage wechseln</Label>
-                            <Input
-                                type="number"
-                                value={ruleInterval}
-                                onChange={(e) => setRuleInterval(e.target.value)}
-                                min="1"
-                                className="w-24"
-                            />
-                        </div>
+
+                        {/* Fixed & Rotation: single recipe list */}
+                        {(ruleType === 'fixed' || ruleType === 'rotation') && (
+                            <div>
+                                <Label className="mb-2 block">
+                                    {ruleType === 'fixed' ? 'Mahlzeit ausw\u00e4hlen' : 'Mahlzeiten (min. 2 ausw\u00e4hlen)'}
+                                </Label>
+                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                    {recipes.map((r) => {
+                                        const selected = ruleRecipeIds.includes(r.id)
+                                        return (
+                                            <button
+                                                key={r.id}
+                                                onClick={() => {
+                                                    if (ruleType === 'fixed') {
+                                                        setRuleRecipeIds(selected ? [] : [r.id])
+                                                    } else {
+                                                        if (selected) {
+                                                            setRuleRecipeIds(ruleRecipeIds.filter((id) => id !== r.id))
+                                                        } else {
+                                                            setRuleRecipeIds([...ruleRecipeIds, r.id])
+                                                        }
+                                                    }
+                                                }}
+                                                className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors cursor-pointer flex items-center justify-between ${selected
+                                                    ? 'bg-primary/15 text-primary'
+                                                    : 'hover:bg-muted'
+                                                    }`}
+                                            >
+                                                {r.name}
+                                                {selected && <Check className="h-4 w-4" />}
+                                            </button>
+                                        )
+                                    })}
+                                    {recipes.length === 0 && (
+                                        <p className="text-sm text-muted-foreground p-3 text-center">
+                                            Erstelle zuerst Mahlzeiten in der Library
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Weekday: Two separate recipe lists */}
+                        {ruleType === 'weekday' && (
+                            <>
+                                <div>
+                                    <Label className="mb-2 block">Mo–Fr Mahlzeit</Label>
+                                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                                        {recipes.map((r) => {
+                                            const selected = ruleWeekdayRecipeIds.includes(r.id)
+                                            return (
+                                                <button
+                                                    key={r.id}
+                                                    onClick={() => setRuleWeekdayRecipeIds(selected ? [] : [r.id])}
+                                                    className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors cursor-pointer flex items-center justify-between ${selected
+                                                        ? 'bg-primary/15 text-primary'
+                                                        : 'hover:bg-muted'
+                                                        }`}
+                                                >
+                                                    {r.name}
+                                                    {selected && <Check className="h-4 w-4" />}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                                <div>
+                                    <Label className="mb-2 block">Sa–So Mahlzeit</Label>
+                                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                                        {recipes.map((r) => {
+                                            const selected = ruleWeekendRecipeIds.includes(r.id)
+                                            return (
+                                                <button
+                                                    key={r.id}
+                                                    onClick={() => setRuleWeekendRecipeIds(selected ? [] : [r.id])}
+                                                    className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors cursor-pointer flex items-center justify-between ${selected
+                                                        ? 'bg-primary/15 text-primary'
+                                                        : 'hover:bg-muted'
+                                                        }`}
+                                                >
+                                                    {r.name}
+                                                    {selected && <Check className="h-4 w-4" />}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Rotation: interval input */}
+                        {ruleType === 'rotation' && (
+                            <div>
+                                <Label className="mb-2 block">Alle N Tage wechseln</Label>
+                                <Input
+                                    type="number"
+                                    value={ruleInterval}
+                                    onChange={(e) => setRuleInterval(e.target.value)}
+                                    min="1"
+                                    className="w-24"
+                                />
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setRuleDialogOpen(false)}>Abbrechen</Button>
-                        <Button onClick={handleSaveRule} disabled={ruleRecipeIds.length < 2}>
+                        <Button onClick={handleSaveRule} disabled={!canSaveRule()}>
                             Speichern
                         </Button>
                     </DialogFooter>
@@ -728,20 +936,28 @@ export function PlannerPage() {
                                     {/* Rules Preview */}
                                     <div>
                                         <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                                            <Badge>Rotationsregeln</Badge>
+                                            <Badge>Regeln</Badge>
                                             <span className="text-muted-foreground font-normal">
                                                 {previewData.rules.length} Regeln
                                             </span>
                                         </h3>
                                         <div className="space-y-2">
-                                            {previewData.rules.map((rule, i) => (
-                                                <div key={i} className="bg-muted/30 rounded-lg p-3 flex items-center gap-3">
-                                                    <Badge variant="outline">{SLOT_LABELS[rule.slotId] ?? rule.slotId}</Badge>
-                                                    <span className="text-sm">
-                                                        Alle {rule.intervalDays} Tage: {rule.recipeNames.join(' → ')}
-                                                    </span>
-                                                </div>
-                                            ))}
+                                            {previewData.rules.map((rule, i) => {
+                                                const typeLabel = rule.type === 'fixed' ? 'T\u00e4glich' : rule.type === 'weekday' ? 'Wochentage' : 'Rotation'
+                                                let desc = ''
+                                                switch (rule.type) {
+                                                    case 'fixed': desc = (rule.recipeNames ?? []).join(', '); break
+                                                    case 'weekday': desc = `Mo\u2013Fr: ${(rule.weekdayRecipeNames ?? []).join(', ')} | Sa\u2013So: ${(rule.weekendRecipeNames ?? []).join(', ')}`; break
+                                                    case 'rotation': desc = `Alle ${rule.intervalDays} Tage: ${(rule.recipeNames ?? []).join(' \u2192 ')}`; break
+                                                }
+                                                return (
+                                                    <div key={i} className="bg-muted/30 rounded-lg p-3 flex items-center gap-3">
+                                                        <Badge variant="outline">{SLOT_LABELS[rule.slotId] ?? rule.slotId}</Badge>
+                                                        <Badge variant="secondary" className="text-[10px]">{typeLabel}</Badge>
+                                                        <span className="text-sm">{desc}</span>
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     </div>
 
@@ -872,14 +1088,22 @@ export function PlannerPage() {
                                 <Badge>Vorschau</Badge>
                             </h3>
                             <div className="space-y-2">
-                                {importPreview.rules.map((rule, i) => (
-                                    <div key={i} className="bg-muted/30 rounded-lg p-3 flex items-center gap-3">
-                                        <Badge variant="outline">{SLOT_LABELS[rule.slotId] ?? rule.slotId}</Badge>
-                                        <span className="text-sm">
-                                            Alle {rule.intervalDays} Tage: {rule.recipeNames.join(' → ')}
-                                        </span>
-                                    </div>
-                                ))}
+                                {importPreview.rules.map((rule, i) => {
+                                    const typeLabel = rule.type === 'fixed' ? 'T\u00e4glich' : rule.type === 'weekday' ? 'Wochentage' : 'Rotation'
+                                    let desc = ''
+                                    switch (rule.type) {
+                                        case 'fixed': desc = (rule.recipeNames ?? []).join(', '); break
+                                        case 'weekday': desc = `Mo\u2013Fr: ${(rule.weekdayRecipeNames ?? []).join(', ')} | Sa\u2013So: ${(rule.weekendRecipeNames ?? []).join(', ')}`; break
+                                        case 'rotation': desc = `Alle ${rule.intervalDays} Tage: ${(rule.recipeNames ?? []).join(' \u2192 ')}`; break
+                                    }
+                                    return (
+                                        <div key={i} className="bg-muted/30 rounded-lg p-3 flex items-center gap-3">
+                                            <Badge variant="outline">{SLOT_LABELS[rule.slotId] ?? rule.slotId}</Badge>
+                                            <Badge variant="secondary" className="text-[10px]">{typeLabel}</Badge>
+                                            <span className="text-sm">{desc}</span>
+                                        </div>
+                                    )
+                                })}
                             </div>
                             {importPreview.newRecipes && importPreview.newRecipes.length > 0 && (
                                 <p className="text-xs text-muted-foreground">

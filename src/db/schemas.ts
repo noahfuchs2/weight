@@ -66,15 +66,24 @@ export const LogEntrySchema = z.object({
 })
 export type LogEntry = z.infer<typeof LogEntrySchema>
 
-// ─── Meal Plan / Rotation Rules ───
-export const RotationRuleSchema = z.object({
+// ─── Meal Plan / Meal Rules ───
+export const MealRuleType = z.enum(['fixed', 'weekday', 'rotation'])
+export type MealRuleType = z.infer<typeof MealRuleType>
+
+export const MealRuleSchema = z.object({
     id: z.string().uuid(),
     slotId: SlotId,
-    recipeIds: z.array(z.string().uuid()).min(2),
-    intervalDays: z.number().int().min(1),
+    type: MealRuleType,
+    // fixed: recipeIds has exactly 1 element
+    // rotation: recipeIds has 1+ elements + intervalDays
+    recipeIds: z.array(z.string().uuid()).optional(),
+    // weekday: separate lists for weekdays (Mon-Fri) and weekends (Sat-Sun)
+    weekdayRecipeIds: z.array(z.string().uuid()).optional(),
+    weekendRecipeIds: z.array(z.string().uuid()).optional(),
+    intervalDays: z.number().int().min(1).optional(),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 })
-export type RotationRule = z.infer<typeof RotationRuleSchema>
+export type MealRule = z.infer<typeof MealRuleSchema>
 
 // ─── AI Import Payload ───
 export const AIFoodSchema = z.object({
@@ -109,8 +118,14 @@ export type AIImportPayload = z.infer<typeof AIImportPayloadSchema>
 // ─── AI Meal Plan Import ───
 export const AIMealPlanRuleSchema = z.object({
     slotId: SlotId,
-    recipeNames: z.array(z.string().min(1)).min(1),
-    intervalDays: z.number().int().min(1),
+    type: MealRuleType,
+    // fixed & rotation
+    recipeNames: z.array(z.string().min(1)).optional(),
+    // weekday
+    weekdayRecipeNames: z.array(z.string().min(1)).optional(),
+    weekendRecipeNames: z.array(z.string().min(1)).optional(),
+    // rotation only
+    intervalDays: z.number().int().min(1).optional(),
 })
 
 export const AIMealPlanImportSchema = z.object({
@@ -121,14 +136,19 @@ export const AIMealPlanImportSchema = z.object({
 export type AIMealPlanImport = z.infer<typeof AIMealPlanImportSchema>
 
 // ─── Meal Plan Export ───
+export interface MealPlanExportRule {
+    slot: string
+    slotId: SlotId
+    type: MealRuleType
+    recipeNames?: string[]
+    weekdayRecipeNames?: string[]
+    weekendRecipeNames?: string[]
+    intervalDays?: number
+}
+
 export interface MealPlanExport {
     exportedAt: string
-    rules: {
-        slot: string
-        slotId: SlotId
-        recipeNames: string[]
-        intervalDays: number
-    }[]
+    rules: MealPlanExportRule[]
     recipes: {
         name: string
         ingredients: {
