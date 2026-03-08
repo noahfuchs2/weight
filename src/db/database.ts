@@ -1,11 +1,13 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Food, Recipe, LogEntry, MealRule } from './schemas'
+import type { Food, Recipe, LogEntry, MealRule, WeightGoal, WeightEntry } from './schemas'
 
 export class NutriDB extends Dexie {
     foods!: EntityTable<Food, 'id'>
     recipes!: EntityTable<Recipe, 'id'>
     logEntries!: EntityTable<LogEntry, 'id'>
     mealRules!: EntityTable<MealRule, 'id'>
+    weightGoal!: EntityTable<WeightGoal, 'id'>
+    weightEntries!: EntityTable<WeightEntry, 'id'>
 
     constructor() {
         super('NutriTrackerDB')
@@ -38,7 +40,18 @@ export class NutriDB extends Dexie {
                 })
             }
         })
+
+        // v3: Add weight tracking tables
+        this.version(3).stores({
+            foods: 'id, name',
+            recipes: 'id, name',
+            logEntries: 'id, date, slotId, [date+slotId]',
+            mealRules: 'id, slotId',
+            weightGoal: 'id',
+            weightEntries: 'id, date',
+        })
     }
 }
 
 export const db = new NutriDB()
+

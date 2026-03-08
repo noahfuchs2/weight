@@ -166,3 +166,20 @@ export interface MealPlanExport {
         }
     }[]
 }
+
+// ─── Weight Tracking ───
+export const WeightGoalSchema = z.object({
+    id: z.literal('current'),
+    startWeight: z.number().positive(),
+    goalWeight: z.number().positive(),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    goalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+})
+export type WeightGoal = z.infer<typeof WeightGoalSchema>
+
+export const WeightEntrySchema = z.object({
+    id: z.string().uuid(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    weight: z.number().positive(),
+})
+export type WeightEntry = z.infer<typeof WeightEntrySchema>

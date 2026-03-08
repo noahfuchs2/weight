@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, BookOpen, Sparkles, CalendarDays } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Sparkles, CalendarDays, Weight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/appStore'
 
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
     { to: '/library', label: 'Library', icon: BookOpen },
     { to: '/import', label: 'AI Import', icon: Sparkles },
     { to: '/planner', label: 'Wochenplan', icon: CalendarDays },
+    { to: '/weight', label: 'Gewicht', icon: Weight },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
