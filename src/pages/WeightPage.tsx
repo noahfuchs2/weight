@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { v4 as uuid } from 'uuid'
-import { Scale, Plus, RotateCcw, Target, TrendingUp, Calendar } from 'lucide-react'
+import { Scale, Plus, RotateCcw, Target, TrendingUp, Calendar, Pencil, X, Check } from 'lucide-react'
 import { db } from '@/db/database'
 import type { WeightGoal } from '@/db/schemas'
 import { WeightChart } from '@/components/weight/WeightChart'
@@ -153,9 +153,34 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
     const [trackDate, setTrackDate] = useState(today)
     const [saving, setSaving] = useState(false)
 
+    // Edit goal state
+    const [editing, setEditing] = useState(false)
+    const [editStartWeight, setEditStartWeight] = useState('')
+    const [editGoalWeight, setEditGoalWeight] = useState('')
+    const [editGoalDate, setEditGoalDate] = useState('')
+
     const latestEntry = entries.length > 0 ? entries[entries.length - 1] : null
     const diff = latestEntry ? latestEntry.weight - goal.startWeight : 0
     const remaining = latestEntry ? goal.goalWeight - latestEntry.weight : goal.goalWeight - goal.startWeight
+
+    function startEditing() {
+        setEditStartWeight(String(goal.startWeight))
+        setEditGoalWeight(String(goal.goalWeight))
+        setEditGoalDate(goal.goalDate)
+        setEditing(true)
+    }
+
+    async function handleSaveEdit() {
+        const sw = Number(editStartWeight)
+        const gw = Number(editGoalWeight)
+        if (!sw || sw <= 0 || !gw || gw <= 0 || !editGoalDate) return
+        await db.weightGoal.update('current', {
+            startWeight: sw,
+            goalWeight: gw,
+            goalDate: editGoalDate,
+        })
+        setEditing(false)
+    }
 
     async function handleAddEntry() {
         const w = Number(newWeight)
@@ -203,14 +228,85 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                         </span>
                     </p>
                 </div>
-                <button
-                    onClick={handleReset}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
-                >
-                    <RotateCcw className="h-4 w-4" />
-                    Zurücksetzen
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={startEditing}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                    >
+                        <Pencil className="h-4 w-4" />
+                        Bearbeiten
+                    </button>
+                    <button
+                        onClick={handleReset}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                    >
+                        <RotateCcw className="h-4 w-4" />
+                        Zurücksetzen
+                    </button>
+                </div>
             </div>
+
+            {/* Edit Goal Inline */}
+            {editing && (
+                <div className="glass rounded-2xl p-6 glow-primary">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-medium">Ziel bearbeiten</h3>
+                        <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                            <X className="h-4 w-4" />
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Startgewicht (kg)</label>
+                            <div className="relative">
+                                <Scale className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="1"
+                                    value={editStartWeight}
+                                    onChange={(e) => setEditStartWeight(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Zielgewicht (kg)</label>
+                            <div className="relative">
+                                <TrendingUp className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="1"
+                                    value={editGoalWeight}
+                                    onChange={(e) => setEditGoalWeight(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Zieldatum</label>
+                            <div className="relative">
+                                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <input
+                                    type="date"
+                                    value={editGoalDate}
+                                    onChange={(e) => setEditGoalDate(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all [color-scheme:dark]"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleSaveEdit}
+                        disabled={!editStartWeight || !editGoalWeight || !editGoalDate || Number(editStartWeight) <= 0 || Number(editGoalWeight) <= 0}
+                        className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        <Check className="h-4 w-4" />
+                        Änderungen speichern
+                    </button>
+                </div>
+            )}
 
             {/* Stats Cards */}
             <div className="grid grid-cols-3 gap-4">
