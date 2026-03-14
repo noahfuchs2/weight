@@ -6,6 +6,18 @@ import { Scale, Plus, RotateCcw, Target, TrendingUp, Calendar, Pencil, X, Check 
 import { db } from '@/db/database'
 import type { WeightGoal } from '@/db/schemas'
 import { WeightChart } from '@/components/weight/WeightChart'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+
+/** Safely format a date string, returns fallback on invalid input */
+function safeFormatDate(dateStr: string, fmt: string, fallback = '–'): string {
+    try {
+        const d = new Date(dateStr + 'T00:00:00')
+        if (isNaN(d.getTime())) return fallback
+        return format(d, fmt)
+    } catch {
+        return fallback
+    }
+}
 
 export function WeightPage() {
     // useLiveQuery returns undefined while loading; we wrap to return null when no record exists
@@ -21,7 +33,11 @@ export function WeightPage() {
         return <SetupForm />
     }
 
-    return <TrackingView goal={goal} entries={entries} />
+    return (
+        <ErrorBoundary>
+            <TrackingView goal={goal} entries={entries} />
+        </ErrorBoundary>
+    )
 }
 
 // ─── Setup Form ───
@@ -224,7 +240,7 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                     <p className="text-sm text-muted-foreground mt-0.5">
                         Ziel: <span className="text-foreground font-medium">{goal.goalWeight} kg</span> bis{' '}
                         <span className="text-foreground font-medium">
-                            {format(new Date(goal.goalDate + 'T00:00:00'), 'dd.MM.yyyy')}
+                            {safeFormatDate(goal.goalDate, 'dd.MM.yyyy')}
                         </span>
                     </p>
                 </div>
@@ -395,7 +411,7 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                                 >
                                     <div className="flex items-center gap-3">
                                         <span className="text-sm text-muted-foreground w-20">
-                                            {format(new Date(entry.date + 'T00:00:00'), 'dd.MM.yyyy')}
+                                            {safeFormatDate(entry.date, 'dd.MM.yyyy')}
                                         </span>
                                         <span className="text-sm font-medium">{entry.weight} kg</span>
                                         {entryDiff !== null && (

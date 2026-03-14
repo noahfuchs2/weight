@@ -23,6 +23,10 @@ export function WeightChart({ goal, entries }: WeightChartProps) {
     const chartData = useMemo(() => {
         const startDate = parseISO(goal.startDate)
         const goalDate = parseISO(goal.goalDate)
+
+        // Validate parsed dates
+        if (isNaN(startDate.getTime()) || isNaN(goalDate.getTime())) return []
+
         const totalDays = differenceInDays(goalDate, startDate)
         if (totalDays <= 0) return []
 
@@ -38,7 +42,10 @@ export function WeightChart({ goal, entries }: WeightChartProps) {
         const today = new Date()
         const endDate = goalDate > today ? goalDate : today
 
-        const totalChartDays = differenceInDays(endDate, startDate)
+        let totalChartDays = differenceInDays(endDate, startDate)
+
+        // Safety cap: prevent runaway loops from corrupted date data (max 2 years)
+        if (totalChartDays > 730) totalChartDays = 730
 
         const data: { date: string; label: string; target: number | null; actual: number | null }[] = []
 
