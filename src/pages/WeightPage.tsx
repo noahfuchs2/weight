@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { v4 as uuid } from 'uuid'
-import { Scale, Plus, RotateCcw, Target, TrendingUp, Calendar, Pencil, X, Check } from 'lucide-react'
+import { Scale, Plus, RotateCcw, Target, TrendingUp, Calendar, Pencil, X, Check, Download, Upload } from 'lucide-react'
 import { db } from '@/db/database'
 import type { WeightGoal } from '@/db/schemas'
 import { WeightChart } from '@/components/weight/WeightChart'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { useWeightBackup } from '@/hooks/useWeightBackup'
+import { exportWeightData, importWeightData } from '@/db/weightBackup'
 
 /** Safely format a date string, returns fallback on invalid input */
 function safeFormatDate(dateStr: string, fmt: string, fallback = '–'): string {
@@ -164,10 +166,15 @@ function SetupForm() {
 
 // ─── Tracking View ───
 function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: string; date: string; weight: number }[] }) {
+    // Auto-backup to localStorage
+    useWeightBackup()
+
     const today = format(new Date(), 'yyyy-MM-dd')
     const [newWeight, setNewWeight] = useState('')
     const [trackDate, setTrackDate] = useState(today)
     const [saving, setSaving] = useState(false)
+    const [importStatus, setImportStatus] = useState<string | null>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
     // Edit goal state
     const [editing, setEditing] = useState(false)
@@ -231,6 +238,28 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
         await db.weightEntries.delete(id)
     }
 
+    async function handleExport() {
+        await exportWeightData()
+    }
+
+    async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        if (!file) return
+        if (!confirm('Bestehende Gewichtsdaten werden überschrieben. Fortfahren?')) {
+            e.target.value = ''
+            return
+        }
+        try {
+            const count = await importWeightData(file)
+            setImportStatus(`✓ ${count} Einträge importiert`)
+            setTimeout(() => setImportStatus(null), 3000)
+        } catch (err) {
+            setImportStatus(`✗ ${err instanceof Error ? err.message : 'Import fehlgeschlagen'}`)
+            setTimeout(() => setImportStatus(null), 4000)
+        }
+        e.target.value = ''
+    }
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -245,6 +274,27 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={handleExport}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                        title="Gewichtsdaten als JSON exportieren"
+                    >
+                        <Download className="h-4 w-4" />
+                    </button>
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                        title="Gewichtsdaten aus JSON importieren"
+                    >
+                        <Upload className="h-4 w-4" />
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={handleImport}
+                        className="hidden"
+                    />
                     <button
                         onClick={startEditing}
                         className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
@@ -261,6 +311,15 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                     </button>
                 </div>
             </div>
+
+            {/* Import Status Toast */}
+            {importStatus && (
+                <div className={`rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+                    importStatus.startsWith('✓') ? 'bg-chart-3/10 text-chart-3' : 'bg-destructive/10 text-destructive'
+                }`}>
+                    {importStatus}
+                </div>
+            )}
 
             {/* Edit Goal Inline */}
             {editing && (
