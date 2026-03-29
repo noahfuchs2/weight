@@ -1,6 +1,5 @@
 import { db } from './database'
 import { WeightGoalSchema, WeightEntrySchema } from './schemas'
-import type { WeightGoal, WeightEntry } from './schemas'
 import { z } from 'zod'
 
 const LS_KEY = 'nutri_weight_backup'
