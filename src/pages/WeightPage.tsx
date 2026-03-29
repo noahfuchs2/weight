@@ -47,10 +47,11 @@ function SetupForm() {
     const today = format(new Date(), 'yyyy-MM-dd')
     const [startWeight, setStartWeight] = useState('')
     const [goalWeight, setGoalWeight] = useState('')
+    const [startDate, setStartDate] = useState(today)
     const [goalDate, setGoalDate] = useState('')
     const [saving, setSaving] = useState(false)
 
-    const canSave = startWeight && goalWeight && goalDate && Number(startWeight) > 0 && Number(goalWeight) > 0
+    const canSave = startWeight && goalWeight && startDate && goalDate && Number(startWeight) > 0 && Number(goalWeight) > 0
 
     async function handleSave() {
         if (!canSave) return
@@ -60,13 +61,13 @@ function SetupForm() {
                 id: 'current',
                 startWeight: Number(startWeight),
                 goalWeight: Number(goalWeight),
-                startDate: today,
+                startDate,
                 goalDate,
             })
             // Also add the starting weight as the first entry
             await db.weightEntries.add({
                 id: uuid(),
-                date: today,
+                date: startDate,
                 weight: Number(startWeight),
             })
         } finally {
@@ -112,6 +113,23 @@ function SetupForm() {
                                 className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                             />
                         </div>
+                    </div>
+
+                    {/* Start Date */}
+                    <div>
+                        <label className="text-sm font-medium text-muted-foreground mb-1.5 block">
+                            Startdatum
+                        </label>
+                        <div className="relative">
+                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all [color-scheme:dark]"
+                            />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">Standardmäßig heute – ändern falls du historische Daten importierst</p>
                     </div>
 
                     {/* Goal Weight */}
@@ -180,6 +198,7 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
     const [editing, setEditing] = useState(false)
     const [editStartWeight, setEditStartWeight] = useState('')
     const [editGoalWeight, setEditGoalWeight] = useState('')
+    const [editStartDate, setEditStartDate] = useState('')
     const [editGoalDate, setEditGoalDate] = useState('')
 
     const latestEntry = entries.length > 0 ? entries[entries.length - 1] : null
@@ -189,6 +208,7 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
     function startEditing() {
         setEditStartWeight(String(goal.startWeight))
         setEditGoalWeight(String(goal.goalWeight))
+        setEditStartDate(goal.startDate)
         setEditGoalDate(goal.goalDate)
         setEditing(true)
     }
@@ -196,10 +216,11 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
     async function handleSaveEdit() {
         const sw = Number(editStartWeight)
         const gw = Number(editGoalWeight)
-        if (!sw || sw <= 0 || !gw || gw <= 0 || !editGoalDate) return
+        if (!sw || sw <= 0 || !gw || gw <= 0 || !editStartDate || !editGoalDate) return
         await db.weightGoal.update('current', {
             startWeight: sw,
             goalWeight: gw,
+            startDate: editStartDate,
             goalDate: editGoalDate,
         })
         setEditing(false)
@@ -330,7 +351,7 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                             <X className="h-4 w-4" />
                         </button>
                     </div>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs text-muted-foreground mb-1 block">Startgewicht (kg)</label>
                             <div className="relative">
@@ -360,6 +381,18 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                             </div>
                         </div>
                         <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">Startdatum</label>
+                            <div className="relative">
+                                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <input
+                                    type="date"
+                                    value={editStartDate}
+                                    onChange={(e) => setEditStartDate(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all [color-scheme:dark]"
+                                />
+                            </div>
+                        </div>
+                        <div>
                             <label className="text-xs text-muted-foreground mb-1 block">Zieldatum</label>
                             <div className="relative">
                                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -374,7 +407,7 @@ function TrackingView({ goal, entries }: { goal: WeightGoal; entries: { id: stri
                     </div>
                     <button
                         onClick={handleSaveEdit}
-                        disabled={!editStartWeight || !editGoalWeight || !editGoalDate || Number(editStartWeight) <= 0 || Number(editGoalWeight) <= 0}
+                        disabled={!editStartWeight || !editGoalWeight || !editStartDate || !editGoalDate || Number(editStartWeight) <= 0 || Number(editGoalWeight) <= 0}
                         className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Check className="h-4 w-4" />
