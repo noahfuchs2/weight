@@ -88,3 +88,84 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* ─── Weight Chart Fullscreen ─── */
+.weight-chart-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: oklch(0.08 0 0 / 0.85);
+  backdrop-filter: blur(16px);
+  animation: wc-fade-in 0.2s ease-out;
+}
+
+.weight-chart-fullscreen-content {
+  width: calc(100% - 48px);
+  height: calc(100% - 48px);
+  max-width: 1600px;
+  background: oklch(0.16 0 0 / 0.8);
+  backdrop-filter: blur(20px);
+  border: 1px solid oklch(0.3 0 0 / 0.5);
+  border-radius: 1.25rem;
+  padding: 24px;
+  box-shadow:
+    0 0 40px oklch(0.72 0.19 155 / 0.08),
+    0 0 80px oklch(0 0 0 / 0.4);
+  animation: wc-scale-in 0.25s ease-out;
+}
+
+@keyframes wc-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes wc-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ─── Height Slider ─── */
+.weight-chart-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: oklch(0.3 0 0);
+  outline: none;
+  transition: background 0.2s;
+}
+
+.weight-chart-slider:hover {
+  background: oklch(0.35 0 0);
+}
+
+.weight-chart-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: oklch(0.72 0.19 155);
+  cursor: pointer;
+  border: 2px solid oklch(0.16 0 0);
+  box-shadow: 0 0 6px oklch(0.72 0.19 155 / 0.4);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.weight-chart-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 10px oklch(0.72 0.19 155 / 0.6);
+}
+
+.weight-chart-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: oklch(0.72 0.19 155);
+  cursor: pointer;
+  border: 2px solid oklch(0.16 0 0);
+  box-shadow: 0 0 6px oklch(0.72 0.19 155 / 0.4);
+}
