@@ -265,7 +265,7 @@ export function WeightChart({ goal, entries }: WeightChartProps) {
                 title={`Breite: ${chartWidth}%`}
             />
             <button
-                onClick={() => setChartWidth(w => Math.max(MAX_WIDTH, w + WIDTH_STEP))}
+                onClick={() => setChartWidth(w => Math.min(MAX_WIDTH, w + WIDTH_STEP))}
                 disabled={chartWidth >= MAX_WIDTH}
                 className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Breite erhöhen"
