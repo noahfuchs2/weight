@@ -50,6 +50,8 @@ function SetupForm() {
     const [startDate, setStartDate] = useState(today)
     const [goalDate, setGoalDate] = useState('')
     const [saving, setSaving] = useState(false)
+    const [importStatus, setImportStatus] = useState<string | null>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
     const canSave = startWeight && goalWeight && startDate && goalDate && Number(startWeight) > 0 && Number(goalWeight) > 0
 
@@ -64,15 +66,32 @@ function SetupForm() {
                 startDate,
                 goalDate,
             })
-            // Also add the starting weight as the first entry
-            await db.weightEntries.add({
-                id: uuid(),
-                date: startDate,
-                weight: Number(startWeight),
-            })
+            // Only add starting weight entry if no entries exist yet for that date
+            const existing = await db.weightEntries.where('date').equals(startDate).first()
+            if (!existing) {
+                await db.weightEntries.add({
+                    id: uuid(),
+                    date: startDate,
+                    weight: Number(startWeight),
+                })
+            }
         } finally {
             setSaving(false)
         }
+    }
+
+    async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        if (!file) return
+        try {
+            const count = await importWeightData(file)
+            setImportStatus(`✓ ${count} Einträge importiert`)
+            setTimeout(() => setImportStatus(null), 4000)
+        } catch (err) {
+            setImportStatus(`✗ ${err instanceof Error ? err.message : 'Import fehlgeschlagen'}`)
+            setTimeout(() => setImportStatus(null), 4000)
+        }
+        e.target.value = ''
     }
 
     return (
@@ -82,6 +101,15 @@ function SetupForm() {
                 <h1 className="text-2xl font-bold">Gewicht</h1>
                 <p className="text-sm text-muted-foreground mt-0.5">Setze dein Gewichtsziel, um mit dem Tracking zu starten</p>
             </div>
+
+            {/* Import Status Toast */}
+            {importStatus && (
+                <div className={`rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+                    importStatus.startsWith('✓') ? 'bg-chart-3/10 text-chart-3' : 'bg-destructive/10 text-destructive'
+                }`}>
+                    {importStatus}
+                </div>
+            )}
 
             {/* Setup Card */}
             <div className="glass rounded-2xl p-8 max-w-lg glow-primary">
@@ -177,6 +205,36 @@ function SetupForm() {
                         {saving ? 'Wird gespeichert…' : 'Ziel speichern & Tracking starten'}
                     </button>
                 </div>
+            </div>
+
+            {/* Import Card */}
+            <div className="glass rounded-2xl p-6 max-w-lg">
+                <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-chart-2/10 flex items-center justify-center">
+                        <Upload className="h-5 w-5 text-chart-2" />
+                    </div>
+                    <div>
+                        <h2 className="font-semibold">Backup importieren</h2>
+                        <p className="text-xs text-muted-foreground">Gewichtsdaten aus einer JSON-Datei wiederherstellen</p>
+                    </div>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                    Importiere zuerst deine Einträge, dann definiere oben dein Ziel.
+                </p>
+                <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-chart-2/10 text-chart-2 text-sm font-medium hover:bg-chart-2/20 transition-colors"
+                >
+                    <Upload className="h-4 w-4" />
+                    JSON-Datei auswählen
+                </button>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleImport}
+                    className="hidden"
+                />
             </div>
         </div>
     )

@@ -103,12 +103,12 @@ export async function importWeightData(file: File): Promise<number> {
     const { goal, entries } = parsed.data
 
     await db.transaction('rw', [db.weightGoal, db.weightEntries], async () => {
-        // Clear existing data
-        await db.weightGoal.clear()
-        await db.weightEntries.clear()
-
-        // Write imported data
-        if (goal) await db.weightGoal.put(goal)
+        // Only overwrite goal if backup contains one
+        if (goal) {
+            await db.weightGoal.clear()
+            await db.weightGoal.put(goal)
+        }
+        // Merge entries (bulkPut = upsert by id, preserves existing entries for other dates)
         if (entries.length > 0) await db.weightEntries.bulkPut(entries)
     })
 
